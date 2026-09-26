@@ -1,0 +1,1124 @@
+diff --git a/Android.mk b/Android.mk
+index 95a4b9c..d9e9a19 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -607,13 +607,39 @@ TWRP_REQUIRED_MODULES += \
+     libresetprop
+ endif
+ 
++# servicemanager.recovery, not servicemanager: the two are separate Soong modules
++# with separate binaries, and only the .recovery one is built with
++# -D__ANDROID_RECOVERY__ (build/soong/cc/compiler.go:496, driven by `recovery: true`
++# in frameworks/native/cmds/servicemanager/Android.bp). That macro is what selects
++# the VINTF manifest servicemanager validates against:
++#
++#   ServiceManager.cpp:81  #ifdef __ANDROID_RECOVERY__
++#                            VintfObjectRecovery::getRecoveryHalManifest()  -> /system/etc/vintf/
++#                          #else
++#                            VintfObject::getDeviceHalManifest()            -> /vendor/etc/vintf/
++#
++# This tree installs its recovery VINTF fragments under
++# TARGET_RECOVERY_ROOT_OUT/system/etc/vintf/manifest (see etc/Android.mk, which puts
++# android.system.keystore2-service.xml there), so the plain variant looks in the
++# wrong place: /vendor/etc/vintf/manifest.xml does not exist, and
++# VintfObject::fetchDeviceHalManifest only reads the fragment directory when that
++# main manifest is present (VintfObject.cpp:323). The device manifest ends up
++# empty, every android.hardware.* AIDL HAL started from init.recovery.qcom.rc is
++# rejected with "Could not find ... in the VINTF manifest", and each one exits 1
++# for init to respawn. keystore2 then fails to construct its mandatory TEE security
++# level (service.rs:69) and panics, so vold blocks forever in
++# AServiceManager_waitForService (Keystore.cpp:106) and recovery never leaves the
++# splash screen.
++#
++# stem: "servicemanager" in Android.bp keeps the installed path identical, and the
++# rc below is already written for the recovery variant (uid 0, u:r:recovery:s0).
+ TWRP_REQUIRED_MODULES += \
+     hwservicemanager \
+     hwservicemanager.rc \
+     vndservicemanager \
+     vndservicemanager.rc \
+     plat_service_contexts \
+-    servicemanager \
++    servicemanager.recovery \
+     servicemanager.rc
+ 
+ ifneq ($(TW_INCLUDE_CRYPTO),)
+@@ -638,7 +664,11 @@ ifneq ($(wildcard external/unzip/Android.mk),)
+ endif
+ 
+ ifneq ($(TW_NO_EXFAT), true)
+-    TWRP_REQUIRED_MODULES += mkexfatfs fsckexfat
++    # fsckexfat is not built: its stem is fsck.exfat, which would collide with
++    # exfatprogs' fsck.exfat that vendor/twrp/config/packages.mk installs into
++    # the recovery root. exfatprogs is the maintained implementation and is what
++    # partition.cpp invokes at /system/bin/fsck.exfat.
++    TWRP_REQUIRED_MODULES += mkexfatfs
+     ifneq ($(TW_NO_EXFAT_FUSE), true)
+         TWRP_REQUIRED_MODULES += exfat-fuse
+     endif
+@@ -857,7 +887,6 @@ ifeq ($(BUILD_ID), GINGERBREAD)
+ endif
+ ifneq ($(TW_NO_EXFAT), true)
+     include $(commands_TWRP_local_path)/exfat/mkfs/Android.mk \
+-            $(commands_TWRP_local_path)/exfat/fsck/Android.mk \
+             $(commands_TWRP_local_path)/fuse/Android.mk \
+             $(commands_TWRP_local_path)/exfat/libexfat/Android.mk
+     ifneq ($(TW_NO_EXFAT_FUSE), true)
+diff --git a/data.cpp b/data.cpp
+index f67a0ec..5563afb 100644
+--- a/data.cpp
++++ b/data.cpp
+@@ -747,6 +747,8 @@ void DataManager::SetDefaultValues()
+ 
+   mConst.SetValue(TW_VERSION_VAR, FOX_BUILD);
+   mConst.SetValue(OF_MAINTAINER_STR, OF_MAINTAINER);
++  mConst.SetValue("of_maintainer_email", OF_MAINTAINER_EMAIL);
++  mConst.SetValue("fox_device_model", android::base::GetProperty("ro.product.model", ""));
+   mConst.SetValue(BUILD_TYPE_STR, FOX_BUILD_TYPE);
+   mConst.SetValue("fox_branch", FOX_BRANCH);
+ 
+@@ -1470,7 +1472,8 @@ void DataManager::SetDefaultValues()
+ #endif
+ #ifdef TW_HAS_MTP
+   mConst.SetValue("tw_has_mtp", "1");
+-  mPersist.SetValue("tw_mtp_enabled", "1");
++  // Default off: MTP is brought up from Mount on demand, not on every boot.
++  mPersist.SetValue("tw_mtp_enabled", "0");
+   mPersist.SetValue("tw_mtp_debug", "0");
+ #else
+   LOGINFO("TW_EXCLUDE_MTP := true\n");
+@@ -1857,4 +1860,3 @@ void DataManager::Leds(bool enable)
+     }
+ }
+ #endif
+-
+diff --git a/gui/button.cpp b/gui/button.cpp
+index 7c87dd7..563b9e9 100755
+--- a/gui/button.cpp
++++ b/gui/button.cpp
+@@ -50,6 +50,7 @@ GUIButton::GUIButton(xml_node<>* node)
+ {
+ 	mButtonImg = NULL;
+ 	mButtonIcon = NULL;
++	mHighlightImg = NULL;
+ 	mButtonLabel = NULL;
+ 	mAction = NULL;
+ 	mRendered = false;
+@@ -84,6 +85,7 @@ GUIButton::GUIButton(xml_node<>* node)
+ 	mButtonIcon = LoadAttrImage(FindNode(node, "icon"), "resource");
+ 
+ 	mHighlightColor = LoadAttrColor(FindNode(node, "highlight"), "color", &hasHighlightColor);
++	mHighlightImg = LoadAttrImage(FindNode(node, "highlight"), "resource");
+ 
+ 	int x = 0, y = 0, w = 0, h = 0;
+ 	TextPlacement = TOP_LEFT;
+@@ -141,6 +143,14 @@ int GUIButton::Render(void)
+ 		gr_color(mFillColor.red, mFillColor.green, mFillColor.blue, mFillColor.alpha);
+ 		gr_fill(mRenderX, mRenderY, mRenderW, mRenderH);
+ 	}
++	if (renderHighlight && mHighlightImg && mHighlightImg->GetResource()) {
++		// A shaped overlay preserves the button's transparent rounded corners.
++		gr_blit(mHighlightImg->GetResource(), 0, 0,
++			mHighlightImg->GetWidth(), mHighlightImg->GetHeight(), mRenderX, mRenderY);
++	} else if (renderHighlight && hasHighlightColor) {
++		gr_color(mHighlightColor.red, mHighlightColor.green, mHighlightColor.blue, mHighlightColor.alpha);
++		gr_fill(mRenderX, mRenderY, mRenderW, mRenderH);
++	}
+ 	if (mButtonIcon && mButtonIcon->GetResource())
+ 		gr_blit(mButtonIcon->GetResource(), 0, 0, mIconW, mIconH, mIconX, mIconY);
+ 	if (mButtonLabel) {
+@@ -152,10 +162,7 @@ int GUIButton::Render(void)
+ 		ret = mButtonLabel->Render();
+ 		if (ret < 0)		return ret;
+ 	}
+-	if (renderHighlight && hasHighlightColor) {
+-		gr_color(mHighlightColor.red, mHighlightColor.green, mHighlightColor.blue, mHighlightColor.alpha);
+-		gr_fill(mRenderX, mRenderY, mRenderW, mRenderH);
+-	}
++
+ 
+ 	if (HasFocus()) {
+ 		gr_color(mFocusColor.red, mFocusColor.green, mFocusColor.blue, mFocusColor.alpha);
+diff --git a/gui/gui.cpp b/gui/gui.cpp
+index a3eb4fd..648a364 100644
+--- a/gui/gui.cpp
++++ b/gui/gui.cpp
+@@ -190,7 +190,7 @@ InputHandler input_handler;
+ 
+ bool InputHandler::processInput(int timeout_ms)
+ {
+-	input_event ev;
++	input_event ev = {};
+ 	int ret = ev_get(&ev, timeout_ms);
+ 
+ 	if (ret < 0)
+@@ -448,6 +448,45 @@ void InputHandler::process_EV_ABS(input_event& ev)
+ 	}
+ }
+ 
++// Power + volume are the hardware shortcuts: power+vol-up drives the torch,
++// power+vol-down takes a screenshot. Resolve them on the key press instead of
++// leaving it to processHoldAndRepeat(), which only fires after a 200ms hold: a
++// tapped KEY_POWER is released long before that, and its release path calls
++// blankTimer.toggleBlank(), so a normal tap blanked the panel before the combo
++// could ever match. Both orders are recognised, since the keys are pressed
++// together and either may arrive first. Returns true when a shortcut consumed
++// the press.
++static bool handlePowerVolumeShortcut(int code, HardwareKeyboard *kb)
++{
++	bool torch = false;
++
++	if (code == KEY_POWER) {
++		if (kb->IsKeyDown(KEY_VOLUMEUP))
++			torch = true;
++		else if (!kb->IsKeyDown(KEY_VOLUMEDOWN))
++			return false;
++	} else if (code == KEY_VOLUMEUP) {
++		if (!kb->IsKeyDown(KEY_POWER))
++			return false;
++		torch = true;
++	} else if (code == KEY_VOLUMEDOWN) {
++		if (!kb->IsKeyDown(KEY_POWER))
++			return false;
++	} else {
++		return false;
++	}
++
++	if (torch)
++		GUIAction::flashlightImpl("");
++	else
++		GUIAction::screenshotImpl("");
++	DataManager::Vibrate("tw_button_vibrate");
++
++	// Keep the power key's release path from toggling the screen for this press.
++	g_suppress_power_toggle_until_ms = nowMs() + 1000;
++	return true;
++}
++
+ void InputHandler::process_EV_KEY(input_event& ev)
+ {
+ 	HardwareKeyboard *kb = PageManager::GetHardwareKeyboard();
+@@ -493,6 +532,17 @@ void InputHandler::process_EV_KEY(input_event& ev)
+ 			return;
+ 		}
+ #endif
++		// Shortcuts are consumed here, before the state machine below arms its
++		// 200ms hold. mime is cleared first because KeyDown() notifies through
++		// Page::NotifyKey, which remaps the key to key+200 while mime > 500 - a
++		// stale value from an earlier hold would mangle this press.
++		if (handlePowerVolumeShortcut(ev.code, kb)) {
++			mime = 0;
++			kb->KeyDown(ev.code);
++			key_status = KS_NONE;
++			touch_status = TS_NONE;
++			return;
++		}
+ 		if (kb->KeyDown(ev.code) >= 0) {
+ 			// Key repeat is enabled for this key
+ 			key_status = KS_KEY_PRESSED;
+@@ -532,8 +582,12 @@ void InputHandler::process_EV_KEY(input_event& ev)
+ 				}
+ 			}
+ 		}
+-		if (mime <= 500)
+-			kb->KeyUp(ev.code);
++		// Always release the key. Skipping KeyUp() on a long hold left it in
++		// mPressedKeys forever, and a stale entry makes a later
++		// AreKeysPressed()/IsKeyDown() match a key the user is not holding any
++		// more - which also arms the power+volume shortcuts on a bare press.
++		// Page handlers ignore down==false, so the extra notify is inert.
++		kb->KeyUp(ev.code);
+ 		key_status = KS_NONE;
+ 		touch_status = TS_NONE;
+ #ifdef TW_USE_KEY_CODE_TOUCH_SYNC
+@@ -722,11 +776,10 @@ static void loopTimer(int input_timeout_ms)
+ 
+ 		timespec diff = TWFunc::timespec_diff(lastCall, curTime);
+ 
+-		// This is really 2 or TW_FRAMERATE times per second
+-		// As long as we get events, increase the timeout so we can catch up with input
+-		long timeout = got_event ? 500000000 : (1.0 / TW_FRAMERATE * 1000000000);
++		// Bound input draining to one frame, even under continuous touch events.
++		const long timeout = 1000000000L / TW_FRAMERATE;
+ 
+-		if (diff.tv_sec || diff.tv_nsec > timeout)
++		if (diff.tv_sec || diff.tv_nsec >= timeout)
+ 		{
+ 			// int32_t input_time = TWFunc::timespec_diff_ms(lastCall, curTime);
+ 			// LOGINFO("loopTimer(): %u ms, count: %u\n", input_time, count);
+@@ -736,10 +789,9 @@ static void loopTimer(int input_timeout_ms)
+ 			return;
+ 		}
+ 
+-		// We need to sleep some period time microseconds
+-		//unsigned int sleepTime = 33333 -(diff.tv_nsec / 1000);
+-		//usleep(sleepTime); // removed so we can scan for input
+-		input_timeout_ms = 0;
++		// Drain queued input without waiting, then let poll sleep until the next
++		// frame. New input wakes poll immediately; an empty queue must not spin.
++		input_timeout_ms = got_event ? 0 : (timeout - diff.tv_nsec + 999999) / 1000000;
+ 	} while (1);
+ }
+ 
+diff --git a/gui/objects.hpp b/gui/objects.hpp
+index 998a0be..edade20 100644
+--- a/gui/objects.hpp
++++ b/gui/objects.hpp
+@@ -690,6 +690,7 @@ public:
+ protected:
+ 	GUIImage* mButtonImg;
+ 	ImageResource* mButtonIcon;
++	ImageResource* mHighlightImg;
+ 	GUIText* mButtonLabel;
+ 	GUIAction* mAction;
+ 	int mTextX, mTextY, mTextW, mTextH;
+diff --git a/gui/theme/common/languages/en.xml b/gui/theme/common/languages/en.xml
+index d798317..73a6d29 100644
+--- a/gui/theme/common/languages/en.xml
++++ b/gui/theme/common/languages/en.xml
+@@ -1267,5 +1267,6 @@
+ 		<string name="listbox_group_additions">Additions</string>
+ 		<string name="partitions_management">Partitions Management</string>
+ 		
++		<string name="build_date">Built</string>
+ 	</resources>
+ </language>
+diff --git a/gui/theme/extra-languages/languages/zh_CN.xml b/gui/theme/extra-languages/languages/zh_CN.xml
+index 16d1066..2081b27 100644
+--- a/gui/theme/extra-languages/languages/zh_CN.xml
++++ b/gui/theme/extra-languages/languages/zh_CN.xml
+@@ -1196,5 +1196,6 @@
+ 		<string name="listbox_group_dynamic_part">动态分区</string>
+ 		<string name="listbox_group_additions">附加菜单</string>
+ 		<string name="partitions_management">分区管理</string>
+-    </resources>
++    	<string name="build_date">构建日期</string>
++	</resources>
+ </language>
+diff --git a/gui/theme/portrait_hdpi/images/SVG/About/avatar_mask.svg b/gui/theme/portrait_hdpi/images/SVG/About/avatar_mask.svg
+new file mode 100644
+index 0000000..b4821eb
+--- /dev/null
++++ b/gui/theme/portrait_hdpi/images/SVG/About/avatar_mask.svg
+@@ -0,0 +1,4 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
++  <!-- Opaque corners over the square avatar, leaving a circular opening. -->
++  <path fill="#ffffff" fill-rule="evenodd" d="M0 0H192V192H0Z M96 0A96 96 0 1 0 96 192A96 96 0 1 0 96 0Z"/>
++</svg>
+diff --git a/gui/theme/portrait_hdpi/pages/settings.xml b/gui/theme/portrait_hdpi/pages/settings.xml
+index db82784..6dbb146 100644
+--- a/gui/theme/portrait_hdpi/pages/settings.xml
++++ b/gui/theme/portrait_hdpi/pages/settings.xml
+@@ -1015,18 +1015,33 @@
+ 				<text>{@abt_device}: %fox_compatibility_fox_device%</text>
+ 			</text>
+ 			
++			<text>
++				<font resource="orangefont" color="%text%"/>
++				<placement x="%about_txt_x%" y="%about_device_y%"/>
++				<text>%fox_device_model%</text>
++			</text>
++			<text>
++				<font resource="caption" color="%text_status%"/>
++				<placement x="%about_txt_x%" y="%about_build_y%"/>
++				<text>{@build_date}: %fox_build_date_display%</text>
++			</text>
++
+ 			<!-- Yan's Card -->
+ 			
++			<image>
++				<image resource="about_card"/>
++				<placement x="48" y="%card1_y%"/>
++			</image>
+ 			<image>
+ 				<image resource="author_yan"/>
+ 				<placement x="%card_img_x%" y="%card_img1_y%"/>
+ 			</image>
+-
+ 			<image>
+-				<image resource="card"/>
+-				<placement x="0" y="%card1_y%"/>
++				<image resource="about_avatar_mask"/>
++				<placement x="%card_img_x%" y="%card_img1_y%"/>
+ 			</image>
+ 
++
+ 			<text style="about_name">
+ 				<placement x="%card_txt_x%" y="%card_img1_y%"/>
+ 				<text>MrYacha</text>
+@@ -1053,16 +1068,20 @@
+ 			
+ 			<!-- fd's Card -->
+ 			
++			<image>
++				<image resource="about_card"/>
++				<placement x="48" y="%card2_y%"/>
++			</image>
+ 			<image>
+ 				<image resource="author_fd"/>
+ 				<placement x="%card_img_x%" y="%card_img2_y%"/>
+ 			</image>
+-
+ 			<image>
+-				<image resource="card"/>
+-				<placement x="0" y="%card2_y%"/>
++				<image resource="about_avatar_mask"/>
++				<placement x="%card_img_x%" y="%card_img2_y%"/>
+ 			</image>
+ 
++
+ 			<text style="about_name">
+ 				<placement x="%card_txt_x%" y="%card_img2_y%"/>
+ 				<text>fordownloads</text>
+@@ -1088,15 +1107,19 @@
+ 			<!-- Card -->
+ 			
+ 			<!-- Bim's Card -->
++			<image>
++				<image resource="about_card"/>
++				<placement x="48" y="%card3_y%"/>
++			</image>
+ 			<image>
+ 				<image resource="author_jabba"/>
+ 				<placement x="%card_img_x%" y="%card_img3_y%"/>
+ 			</image>
+-			
+ 			<image>
+-				<image resource="card"/>
+-				<placement x="0" y="%card3_y%"/>
++				<image resource="about_avatar_mask"/>
++				<placement x="%card_img_x%" y="%card_img3_y%"/>
+ 			</image>
++			
+ 
+ 			<text style="about_name">
+ 				<placement x="%card_txt_x%" y="%card_img3_y%"/>
+@@ -1123,6 +1146,13 @@
+ 			<!-- Card -->
+ 			
+ 			<!-- Maintainer -->
++			<image>
++				<image resource="about_card"/>
++				<condition var1="of_maintainer" op="!=" var2="3"/>
++				<condition var1="of_maintainer" op="!=" var2="2"/>
++				<condition var1="of_maintainer" op="!=" var2="1"/>
++				<placement x="48" y="%card4_y%"/>
++			</image>
+ 			<image>
+ 				<image resource="maintainer_img"/>
+ 				<condition var1="of_maintainer" op="!=" var2="3"/>
+@@ -1130,14 +1160,14 @@
+ 				<condition var1="of_maintainer" op="!=" var2="1"/>
+ 				<placement x="%card_img_x%" y="%card_img4_y%"/>
+ 			</image>
+-			
+ 			<image>
+-				<image resource="card"/>
++				<image resource="about_avatar_mask"/>
+ 				<condition var1="of_maintainer" op="!=" var2="3"/>
+ 				<condition var1="of_maintainer" op="!=" var2="2"/>
+ 				<condition var1="of_maintainer" op="!=" var2="1"/>
+-				<placement x="0" y="%card4_y%"/>
++				<placement x="%card_img_x%" y="%card_img4_y%"/>
+ 			</image>
++			
+ 
+ 			<text style="about_name">
+ 				<condition var1="of_maintainer" op="!=" var2="3"/>
+@@ -1155,7 +1185,7 @@
+ 				<text>{@abt_maintainer}</text>
+ 			</text>
+ 			<!-- Card -->
+-			
++
+ 			<!-- Credits button when maintainer is OrangeFox developer -->
+ 			<image>
+ 				<condition var1="of_maintainer" op="&lt;=" var2="3"/>
+@@ -1187,7 +1217,7 @@
+ 				<condition var1="of_maintainer" op="!=" var2="3"/>
+ 				<condition var1="of_maintainer" op="!=" var2="2"/>
+ 				<condition var1="of_maintainer" op="!=" var2="1"/>
+-				<placement x="752" y="%card4_btn_y%"/>
++				<placement x="%center_x%" y="%card4_btn_y%" placement="4"/>
+ 				<text>{@more}</text>
+ 				<action function="set">credits_page=0</action>
+ 				<action function="page">about_credits</action>
+diff --git a/gui/theme/portrait_hdpi/resources/images.xml b/gui/theme/portrait_hdpi/resources/images.xml
+index 76a66eb..d3f9da0 100644
+--- a/gui/theme/portrait_hdpi/resources/images.xml
++++ b/gui/theme/portrait_hdpi/resources/images.xml
+@@ -14,6 +14,9 @@
+         <!-- TODO: create variables -->
+ 		<shape name="btn_raised" w="%btn_w%" h="%btn_h%" radius="-1" color="%neutral_light%" />
+ 		<shape name="btn_raised_hl" w="%btn_w%" h="%btn_h%" radius="-1" color="%accent%" />
++		<shape name="btn_raised_press" w="%btn_w%" h="%btn_h%" radius="-1" color="%highlight_color%" />
++		<image name="about_avatar_mask" filename="SVG/About/avatar_mask.svg" retainaspect="1" tint="%cards_bg%"/>
++		<shape name="about_card" w="984" h="240" radius="24" color="%cards_bg%" />
+ 		<shape name="btn_flat_qw" w="%btn_half_w%" h="%btn_h%" radius="-1" stroke="3" color="#666666"/>
+ 
+ 		<shape name="btn_raised_warn" w="%btn_w%" h="%btn_h%" radius="-1" color="#E51C23" />
+diff --git a/gui/theme/portrait_hdpi/resources/styles.xml b/gui/theme/portrait_hdpi/resources/styles.xml
+index 2002091..12020bb 100644
+--- a/gui/theme/portrait_hdpi/resources/styles.xml
++++ b/gui/theme/portrait_hdpi/resources/styles.xml
+@@ -137,19 +137,19 @@
+ 		</style>
+ 
+ 		<style name="btn_raised">
+-			<highlight color="%highlight_color%"/>
++			<highlight color="%highlight_color%" resource="btn_raised_press"/>
+ 			<font resource="Secondary" color="%text%"/>
+ 			<image resource="btn_raised"/>
+ 		</style>
+ 
+ 		<style name="btn_raised_warn">
+-			<highlight color="%highlight_color%"/>
++			<highlight color="%highlight_color%" resource="btn_raised_press"/>
+ 			<font resource="Secondary" color="#FFFFFF"/>
+ 			<image resource="btn_raised_warn"/>
+ 		</style>
+ 
+ 		<style name="btn_raised_hl">
+-			<highlight color="%highlight_color%"/>
++			<highlight color="%highlight_color%" resource="btn_raised_press"/>
+ 			<font resource="Secondary" color="%text_hl_btn%"/>
+ 			<image resource="btn_raised_hl"/>
+ 		</style>
+diff --git a/gui/theme/portrait_hdpi/resources/vars.xml b/gui/theme/portrait_hdpi/resources/vars.xml
+index 8678f38..c87e659 100644
+--- a/gui/theme/portrait_hdpi/resources/vars.xml
++++ b/gui/theme/portrait_hdpi/resources/vars.xml
+@@ -331,37 +331,39 @@
+ 		<variable name="about_txt2_y" value="370+%cutout_w%"/>
+ 		<variable name="about_txt3_y" value="420+%cutout_w%"/>
+ 		<variable name="about_txt4_y" value="470+%cutout_w%"/>
+-
+-		<variable name="cardtxt_1" value="718+%cutout_w%"/>
+-		<variable name="cardtxt_2" value="778+%cutout_w%"/>
+-		<variable name="cardtxt_3" value="1006+%cutout_w%"/>
+-		<variable name="cardtxt_4" value="1066+%cutout_w%"/>
+-		<variable name="cardtxt_5" value="1294+%cutout_w%"/>
+-		<variable name="cardtxt_6" value="1354+%cutout_w%"/>
+-		<variable name="cardtxt_7" value="1582+%cutout_w%"/>
+-		<variable name="cardtxt_8" value="1642+%cutout_w%"/>
+-
+-		<variable name="card1_y" value="576+%cutout_w%"/>
+-		<variable name="card2_y" value="864+%cutout_w%"/>
+-		<variable name="card3_y" value="1152+%cutout_w%"/>
+-		<variable name="card4_y" value="1440+%cutout_w%"/>
+-		<variable name="card4_btn_y" value="1604+%cutout_w%"/>
++		<variable name="about_device_y" value="520+%cutout_w%"/>
++		<variable name="about_build_y" value="570+%cutout_w%"/>
++
++		<variable name="cardtxt_1" value="826+%cutout_w%"/>
++		<variable name="cardtxt_2" value="886+%cutout_w%"/>
++		<variable name="cardtxt_3" value="1114+%cutout_w%"/>
++		<variable name="cardtxt_4" value="1174+%cutout_w%"/>
++		<variable name="cardtxt_5" value="1402+%cutout_w%"/>
++		<variable name="cardtxt_6" value="1462+%cutout_w%"/>
++		<variable name="cardtxt_7" value="1690+%cutout_w%"/>
++		<variable name="cardtxt_8" value="1750+%cutout_w%"/>
++
++		<variable name="card1_y" value="732+%cutout_w%"/>
++		<variable name="card2_y" value="1020+%cutout_w%"/>
++		<variable name="card3_y" value="1308+%cutout_w%"/>
++		<variable name="card4_y" value="1596+%cutout_w%"/>
++		<variable name="card4_btn_y" value="1910+%cutout_w%"/>
+ 
+ 		<variable name="card1_mtag_x" value="744"/>
+ 		<variable name="card1_ctag_x" value="748"/>
+-		<variable name="card1_mtag_y" value="636+%cutout_w%"/>
+-		<variable name="card2_mtag_y" value="924+%cutout_w%"/>
+-		<variable name="card3_mtag_y" value="1212+%cutout_w%"/>
+-		<variable name="card4_mtag_y" value="1500+%cutout_w%"/>
+-		<variable name="card1_ctag_y" value="640+%cutout_w%"/>
+-		<variable name="card2_ctag_y" value="928+%cutout_w%"/>
+-		<variable name="card3_ctag_y" value="1216+%cutout_w%"/>
+-		<variable name="card4_ctag_y" value="1504+%cutout_w%"/>
+-
+-		<variable name="card_img1_y" value="648+%cutout_w%"/>
+-		<variable name="card_img2_y" value="936+%cutout_w%"/>
+-		<variable name="card_img3_y" value="1224+%cutout_w%"/>
+-		<variable name="card_img4_y" value="1512+%cutout_w%"/>
++		<variable name="card1_mtag_y" value="744+%cutout_w%"/>
++		<variable name="card2_mtag_y" value="1032+%cutout_w%"/>
++		<variable name="card3_mtag_y" value="1320+%cutout_w%"/>
++		<variable name="card4_mtag_y" value="1608+%cutout_w%"/>
++		<variable name="card1_ctag_y" value="748+%cutout_w%"/>
++		<variable name="card2_ctag_y" value="1036+%cutout_w%"/>
++		<variable name="card3_ctag_y" value="1324+%cutout_w%"/>
++		<variable name="card4_ctag_y" value="1612+%cutout_w%"/>
++
++		<variable name="card_img1_y" value="756+%cutout_w%"/>
++		<variable name="card_img2_y" value="1044+%cutout_w%"/>
++		<variable name="card_img3_y" value="1332+%cutout_w%"/>
++		<variable name="card_img4_y" value="1620+%cutout_w%"/>
+ 
+ 		<variable name="card_txt_x" value="300"/>
+ 		<variable name="card_img_x" value="72"/>
+diff --git a/gui/theme/portrait_hdpi/splash.xml b/gui/theme/portrait_hdpi/splash.xml
+index 788d80a..54ba54e 100644
+--- a/gui/theme/portrait_hdpi/splash.xml
++++ b/gui/theme/portrait_hdpi/splash.xml
+@@ -14,11 +14,15 @@
+ 		<image name="splash_bg" filename="Splash/user" retainaspect="1"/>
+ 		<font name="of" filename="InterDisplay-Medium.ttf" size="64"/>
+ 		<font name="recovery" filename="InterDisplay-Regular.ttf" size="52"/>
++		<font name="build_info" filename="InterDisplay-Regular.ttf" size="32"/>
+ 	</resources>
+ 
+ 	<variables>
+ 		<variable name="of" value="%screen_h%-400"/>
+ 		<variable name="rec" value="%screen_h%-320"/>
++		<variable name="device_info_y" value="%screen_h%-238"/>
++		<variable name="build_info_y" value="%screen_h%-193"/>
++		<variable name="maintainer_info_y" value="%screen_h%-148"/>
+ 		<variable name="screen_width" value="1080"/>
+ 		<variable name="screen_height" value="1920"/>
+ 		<variable name="header_color" value="#000000"/>
+@@ -43,17 +47,35 @@
+ 				<placement x="540" y="%center_y%" placement="4"/>
+ 			</image>
+ 
+-			<text style="menu_text">
++			<text>
+ 				<placement x="540" y="%of%" placement="4"/>
+ 				<font resource="of" color="#ffffff"/>
+ 				<text>OrangeFox</text>
+ 			</text>
+ 
+-			<text style="menu_text">
++			<text>
+ 				<placement x="540" y="%rec%" placement="4"/>
+ 				<font resource="recovery" color="#ffffff"/>
+ 				<text>Recovery</text>
+ 			</text>
++
++			<text>
++				<placement x="540" y="%device_info_y%" placement="4"/>
++				<font resource="build_info" color="#ffffff"/>
++				<text>%fox_device_model% (%fox_compatibility_fox_device%)</text>
++			</text>
++
++			<text>
++				<placement x="540" y="%build_info_y%" placement="4"/>
++				<font resource="build_info" color="#ffffff"/>
++				<text>Build: %fox_build_date_display%</text>
++			</text>
++
++			<text>
++				<placement x="540" y="%maintainer_info_y%" placement="4"/>
++				<font resource="build_info" color="#ffffff"/>
++				<text>Maintainer: %of_maintainer%</text>
++			</text>
+ 		</page>
+ 	</pages>
+ </recovery>
+diff --git a/gui/theme/portrait_hdpi/themes/style.xml b/gui/theme/portrait_hdpi/themes/style.xml
+index 123c940..6babfb4 100644
+--- a/gui/theme/portrait_hdpi/themes/style.xml
++++ b/gui/theme/portrait_hdpi/themes/style.xml
+@@ -262,8 +262,8 @@
+ 
+ 		<variable name="power_bg" value="#F9F1E7"/>
+ 		<variable name="power_hl" value="#E9E9E944"/>
+-		<variable name="highlight_color" value="#eedfc8"/>
+-		<variable name="highlight_color_full" value="#eedfc8"/>
++		<variable name="highlight_color" value="#eedfc866"/>
++		<variable name="highlight_color_full" value="#eedfc844"/>
+ 
+ 		<variable name="text" value="#413327"/>
+ 		<variable name="text_secondary" value="#5F6368"/>
+diff --git a/gui/theme/portrait_hdpi/themes/styles/Cream.xml b/gui/theme/portrait_hdpi/themes/styles/Cream.xml
+index 73891b4..f78cb26 100644
+--- a/gui/theme/portrait_hdpi/themes/styles/Cream.xml
++++ b/gui/theme/portrait_hdpi/themes/styles/Cream.xml
+@@ -260,8 +260,8 @@
+ 
+ 		<variable name="power_bg" value="#F9F1E7"/>
+ 		<variable name="power_hl" value="#E9E9E944"/>
+-		<variable name="highlight_color" value="#eedfc8"/>
+-		<variable name="highlight_color_full" value="#eedfc8"/>
++		<variable name="highlight_color" value="#eedfc866"/>
++		<variable name="highlight_color_full" value="#eedfc844"/>
+ 
+ 		<variable name="text" value="#413327"/>
+ 		<variable name="text_secondary" value="#5F6368"/>
+diff --git a/minuitwrp/events.cpp b/minuitwrp/events.cpp
+index e497df6..2ca5241 100644
+--- a/minuitwrp/events.cpp
++++ b/minuitwrp/events.cpp
+@@ -21,12 +21,15 @@
+ #include <sys/poll.h>
+ #include <limits.h>
+ #include <linux/input.h>
++#include <sys/ioctl.h>
++#include <errno.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <stdio.h>
+ #include <string.h>
+ #include <fstream>
++#include <mutex>
+ #ifdef USE_QTI_AIDL_HAPTICS_FIX_OFF
+ #include <thread>
+ #endif
+@@ -147,6 +150,60 @@ int write_to_file(const std::string& fn, const std::string& line) {
+ 
+ #ifndef TW_NO_HAPTICS
+ #ifndef TW_HAPTICS_TSPDRV
++#if !defined(USE_QTI_HAPTICS) && !defined(USE_QTI_AIDL_HAPTICS) && !defined(USE_SAMSUNG_HAPTICS)
++// Newer Qualcomm drivers expose force feedback through evdev instead of the
++// timed_output or LED sysfs interfaces. Keep the fd open while an effect plays.
++static int vibrate_evdev(int timeout_ms)
++{
++    static std::mutex lock;
++    std::lock_guard<std::mutex> guard(lock);
++    static int fd = -1;
++    static int effect_id = -1;
++    if (fd < 0) {
++        DIR* dir = opendir("/dev/input");
++        if (!dir) return -1;
++        struct dirent* entry;
++        while ((entry = readdir(dir))) {
++            if (strncmp(entry->d_name, "event", 5) != 0) continue;
++            std::string path = std::string("/dev/input/") + entry->d_name;
++            int candidate = open(path.c_str(), O_RDWR | O_CLOEXEC);
++            if (candidate < 0) continue;
++            unsigned long caps[(FF_MAX + sizeof(unsigned long) * 8) / (sizeof(unsigned long) * 8)] = {};
++            const size_t bits = sizeof(unsigned long) * 8;
++            if (ioctl(candidate, EVIOCGBIT(EV_FF, sizeof(caps)), caps) >= 0 &&
++                (caps[FF_CONSTANT / bits] & (1UL << (FF_CONSTANT % bits)))) {
++                fd = candidate;
++                LOGI("Using evdev haptics: %s\n", path.c_str());
++                break;
++            }
++            close(candidate);
++        }
++        closedir(dir);
++        if (fd < 0) return -1;
++    }
++
++    if (timeout_ms <= 0 && effect_id < 0) return 0;
++    if (timeout_ms > 0) {
++        struct ff_effect effect = {};
++        effect.type = FF_CONSTANT;
++        effect.id = effect_id;
++        effect.u.constant.level = 0x4000;
++        effect.replay.length = timeout_ms;
++        // Re-upload on every click: the driver may stop its module at expiry.
++        if (ioctl(fd, EVIOCSFF, &effect) < 0) {
++            LOGI("Unable to upload haptic effect: %s\n", strerror(errno));
++            return -1;
++        }
++        effect_id = effect.id;
++    }
++    struct input_event event = {};
++    event.type = EV_FF;
++    event.code = effect_id;
++    event.value = timeout_ms > 0 ? 1 : 0;
++    return write(fd, &event, sizeof(event)) == sizeof(event) ? 0 : -1;
++}
++#endif
++
+ int vibrate(int timeout_ms)
+ {
+     if (timeout_ms > 10000) timeout_ms = 1000;
+@@ -185,8 +242,11 @@ int vibrate(int timeout_ms)
+     if (std::ifstream(LEDS_HAPTICS_ACTIVATE_FILE).good()) {
+         write_to_file(LEDS_HAPTICS_DURATION_FILE, tout);
+         write_to_file(LEDS_HAPTICS_ACTIVATE_FILE, "1");
+-    } else
++    } else if (std::ifstream(VIBRATOR_TIMEOUT_FILE).good()) {
+         write_to_file(VIBRATOR_TIMEOUT_FILE, tout);
++    } else {
++        return vibrate_evdev(timeout_ms);
++    }
+ #endif
+     return 0;
+ }
+diff --git a/orangefox.mk b/orangefox.mk
+index 67e0081..cb3e869 100644
+--- a/orangefox.mk
++++ b/orangefox.mk
+@@ -219,6 +219,8 @@ else
+     LOCAL_CFLAGS += -DOF_MAINTAINER='"Testing build (unofficial)"'
+ endif
+ 
++LOCAL_CFLAGS += -DOF_MAINTAINER_EMAIL='"$(OF_MAINTAINER_EMAIL)"'
++
+ ifneq ($(OF_FLASHLIGHT_ENABLE),)
+     LOCAL_CFLAGS += -DOF_FLASHLIGHT_ENABLE='"$(OF_FLASHLIGHT_ENABLE)"'
+ else
+diff --git a/partition.cpp b/partition.cpp
+index 1914cf4..2d40df9 100644
+--- a/partition.cpp
++++ b/partition.cpp
+@@ -1648,6 +1648,15 @@ bool TWPartition::Mount(bool Display_Error) {
+ 
+ 	Find_Actual_Block_Device();
+ 
++	// Discovery may identify a whole-disk container with mountable children.
++	if (!Can_Be_Mounted)
++		return false;
++
++	// Automatic storage scans also visit unplugged USB/SD storage. There is
++	// nothing to mount until its block device appears.
++	if (Removable && !Is_Present && !Display_Error)
++		return false;
++
+ 	// Check the current file system before mounting
+ 	Check_FS_Type();
+ 	if (Current_File_System == "exfat" && TWFunc::Path_Exists("/system/bin/exfat-fuse")) {
+@@ -3342,6 +3351,7 @@ fail:
+ 
+ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
+ 	int mount_point_index = 0; // we will need to create separate mount points for each partition found and we use this index to name each one
++	bool found = false;
+ 	string Path = TWFunc::Get_Path(Device);
+ 	string Dev = TWFunc::Get_Filename(Device);
+ 	size_t wildcard_index = Dev.find("*");
+@@ -3360,6 +3370,7 @@ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
+ 
+ 		string item = Path + "/";
+ 		item.append(de->d_name);
++		found = true;
+ 		if (PartitionManager.Find_Partition_By_Block_Device(item))
+ 			continue;
+ 		TWPartition *part = new TWPartition;
+@@ -3386,7 +3397,9 @@ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
+ 		PartitionManager.Add_Partition(part);
+ 	}
+ 	closedir(d);
+-	return (mount_point_index > 0);
++	// Existing children still mean this is a partitioned disk, not a filesystem
++	// to probe and mount as a whole on the next storage refresh.
++	return found;
+ }
+ 
+ void TWPartition::Find_Actual_Block_Device(void) {
+diff --git a/partitionmanager.cpp b/partitionmanager.cpp
+index 2fe6694..6fe0714 100755
+--- a/partitionmanager.cpp
++++ b/partitionmanager.cpp
+@@ -61,6 +61,7 @@
+ #include <libgsi/libgsi.h>
+ #include <liblp/builder.h>
+ #include <libsnapshot/snapshot.h>
++#include <private/android_filesystem_config.h>
+ #include "variables.h"
+ #include "twcommon.h"
+ #include "partitions.hpp"
+@@ -583,6 +584,9 @@ void TWPartitionManager::Setup_Fstab_Partitions(bool Display_Error) {
+ 		if (sys)
+ 			sys->UnMount(Display_Error);
+ 	#endif
++		// Device crypto services must see the ramdisk's vendor libraries after
++		// the temporary stock mounts used for APEX setup have been released.
++		property_set("twrp.crypto.ready", "1");
+ 
+ 		if (!datamedia && !settings_partition && Find_Partition_By_Path("/sdcard") == NULL && Find_Partition_By_Path("/internal_sd") == NULL && Find_Partition_By_Path("/internal_sdcard") == NULL && Find_Partition_By_Path("/emmc") == NULL) {
+ 			// Attempt to automatically identify /data/media emulated storage devices
+@@ -918,7 +922,8 @@ int TWPartitionManager::Mount_By_Path(string Path, bool Display_Error) {
+ 	std::vector<TWPartition*>::iterator iter;
+ 	int ret = false;
+ 	bool found = false;
+-	string Local_Path = TWFunc::Get_Root_Path(Path);
++	TWPartition* Part = Find_Partition_By_Path(Path);
++	string Local_Path = Part ? Part->Mount_Point : TWFunc::Get_Root_Path(Path);
+ 	
+ 
+ 	if (Local_Path == "/tmp" || Local_Path == "/")
+@@ -953,7 +958,8 @@ int TWPartitionManager::UnMount_By_Path(string Path, bool Display_Error, int fla
+ 	std::vector<TWPartition*>::iterator iter;
+ 	int ret = false;
+ 	bool found = false;
+-	string Local_Path = TWFunc::Get_Root_Path(Path);
++	TWPartition* Part = Find_Partition_By_Path(Path);
++	string Local_Path = Part ? Part->Mount_Point : TWFunc::Get_Root_Path(Path);
+ 	
+ 
+   	#ifdef OF_DEVICE_WITHOUT_PERSIST
+@@ -1008,20 +1014,34 @@ int TWPartitionManager::Mount_Settings_Storage(bool Display_Error) {
+ 
+ TWPartition* TWPartitionManager::Find_Partition_By_Path(const string& Path) {
+ 	std::vector<TWPartition*>::iterator iter;
+-	string Local_Path = TWFunc::Get_Root_Path(Path);
++	string Local_Path = Path;
++	if (Local_Path.empty() || Local_Path[0] != '/')
++		Local_Path = "/" + Local_Path;
+ 
+   	#ifdef OF_DEVICE_WITHOUT_PERSIST
+-  	if (Local_Path == "/persist")
++  	if (TWFunc::Get_Root_Path(Local_Path) == "/persist")
+       		return NULL;
+   	#endif
+ 
+-	if (Local_Path == "/system")
+-		Local_Path = Get_Android_Root_Path();
++	if (TWFunc::Get_Root_Path(Local_Path) == "/system")
++		Local_Path.replace(0, string("/system").size(), Get_Android_Root_Path());
++
++	// Keep nested mount points intact and prefer the partition containing the
++	// path most closely. Require a slash boundary (e.g. /data != /database).
++	TWPartition* Match = NULL;
++	size_t Match_Length = 0;
+ 	for (iter = Partitions.begin(); iter != Partitions.end(); iter++) {
+-		if ((*iter)->Mount_Point == Local_Path || (!(*iter)->Symlink_Mount_Point.empty() && (*iter)->Symlink_Mount_Point == Local_Path))
+-			return (*iter);
++		for (const string& Mount_Point : {(*iter)->Mount_Point, (*iter)->Symlink_Mount_Point}) {
++			if (!Mount_Point.empty() && Mount_Point.size() > Match_Length &&
++			    (Local_Path == Mount_Point ||
++			     (Local_Path.compare(0, Mount_Point.size(), Mount_Point) == 0 &&
++			      Local_Path.size() > Mount_Point.size() && Local_Path[Mount_Point.size()] == '/'))) {
++				Match = *iter;
++				Match_Length = Mount_Point.size();
++			}
++		}
+ 	}
+-	return NULL;
++	return Match;
+ }
+ 
+ TWPartition* TWPartitionManager::Find_Partition_By_Block_Device(const string& Block_Device) {
+@@ -2904,7 +2924,9 @@ void TWPartitionManager::Get_Partition_List(string ListType,
+       string Current_Storage = DataManager::GetCurrentStoragePath();
+       for (iter = Partitions.begin(); iter != Partitions.end(); iter++)
+ 	{
+-	  if ((*iter)->Is_Storage)
++	  // Only real, mountable storage belongs in the destination selector.
++	  // Hotplug placeholders and whole-disk containers have no usable capacity.
++	  if ((*iter)->Is_Storage && (*iter)->Is_Present && (*iter)->Can_Be_Mounted)
+ 	    {
+ 	      struct PartitionList part;
+ 	      sprintf(free_space, "%llu", (*iter)->Free / 1024 / 1024);
+diff --git a/prebuilt/Android.mk b/prebuilt/Android.mk
+index e5c42b9..4a93378 100644
+--- a/prebuilt/Android.mk
++++ b/prebuilt/Android.mk
+@@ -91,7 +91,8 @@ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/keystore
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/keystore_auth
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/keystore_cli_v2
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_SYSTEM_EXT_EXECUTABLES)/hwservicemanager
+-RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/servicemanager
++# servicemanager.recovery installs directly into the ramdisk. Relinking the
++# system variant here can overwrite it with the wrong VINTF lookup behavior.
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/vold_prepare_subdirs
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_VENDOR_EXECUTABLES)/vndservicemanager
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/toybox
+@@ -392,7 +393,8 @@ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libziparchive.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libext2_blkid.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libext2_quota.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libhidl-gen-utils.so
+-RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libvintf.so
++# servicemanager.recovery installs libvintf.recovery into the ramdisk. Keep its
++# VintfObjectRecovery symbols instead of overwriting it with the system variant.
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libtinyxml2.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hidl.token@1.0.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator@1.0.so
+@@ -445,6 +447,9 @@ LOCAL_MODULE := relink_libraries
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE_CLASS := EXECUTABLES
+ LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/
++# Required modules impose build order only; refresh the ramdisk copy when the
++# graphics/input library changes during an incremental recovery build.
++LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_SHARED_LIBRARIES)/libminuitwrp.so
+ ifneq ($(TARGET_ARCH), arm64)
+     ifneq ($(TARGET_ARCH), x86_64)
+         LOCAL_POST_INSTALL_CMD += $(RELINK) $(TARGET_RECOVERY_ROOT_OUT)/system/lib $(RECOVERY_LIBRARY_SOURCE_FILES)
+@@ -497,14 +502,15 @@ LOCAL_POST_INSTALL_CMD += \
+     cp $(TARGET_OUT_ETC)/selinux/plat_hwservice_contexts $(TARGET_RECOVERY_ROOT_OUT)/system/etc/selinux/plat_hwservice_contexts && \
+     cp $(TARGET_OUT_VENDOR_ETC)/selinux/vndservice_contexts $(TARGET_RECOVERY_ROOT_OUT)/vendor/etc/selinux/vndservice_contexts && \
+     cp $(TARGET_OUT_VENDOR_ETC)/selinux/vendor_hwservice_contexts $(TARGET_RECOVERY_ROOT_OUT)/vendor/etc/selinux/vendor_hwservice_contexts && \
+-    cp $(TARGET_OUT_ETC)/selinux/plat_keystore2_key_contexts $(TARGET_RECOVERY_ROOT_OUT)/system/etc/selinux/plat_keystore2_key_contexts
+-#    cp $(TARGET_OUT_ETC)/task_profiles.json $(TARGET_RECOVERY_ROOT_OUT)/system/etc/task_profiles/task_profiles_30.json
++    cp $(TARGET_OUT_ETC)/selinux/plat_keystore2_key_contexts $(TARGET_RECOVERY_ROOT_OUT)/system/etc/selinux/plat_keystore2_key_contexts && \
++    cp $(TARGET_OUT_ETC)/task_profiles.json $(TARGET_RECOVERY_ROOT_OUT)/system/etc/task_profiles.json
+ 
+     ifeq ($(TARGET_USES_MKE2FS), true)
+         LOCAL_POST_INSTALL_CMD += \
+             && cp $(TARGET_OUT_ETC)/mke2fs.conf $(TARGET_RECOVERY_ROOT_OUT)/system/etc/mke2fs.conf
+     endif
+ LOCAL_REQUIRED_MODULES += init_second_stage.recovery \
++    task_profiles.json \
+     reboot.recovery \
+     plat_service_contexts \
+     plat_hwservice_contexts \
+@@ -566,7 +572,7 @@ LOCAL_SRC_FILES := $(LOCAL_MODULE)
+ include $(BUILD_PREBUILT)
+ 
+ ifneq (,$(filter $(TW_INCLUDE_REPACKTOOLS) $(TW_INCLUDE_RESETPROP) $(TW_INCLUDE_LIBRESETPROP), true))
+-    ifeq ($(wildcard external/magisk-prebuilt/Android.mk),)
++    ifeq ($(wildcard external/magisk-prebuilt/prebuilt/Android.bp),)
+         $(warning Magisk prebuilt tools not found!)
+         $(warning Please place https://github.com/TeamWin/external_magisk-prebuilt)
+         $(warning into external/magisk-prebuilt)
+diff --git a/twrp-functions.cpp b/twrp-functions.cpp
+index ef35ae7..3cb2751 100755
+--- a/twrp-functions.cpp
++++ b/twrp-functions.cpp
+@@ -1825,7 +1825,7 @@ void TWFunc::Fixup_Time_On_Boot(const string & time_paths)
+ 	if (DataManager::GetValue("fox_epoch_drift", stored_drift) < 0) // read from .foxs
+ 	 	stored_drift = 0;
+ 	#ifndef OF_DEVICE_WITHOUT_PERSIST
+-	 if (TWFunc::read_file (epoch_drift_file, drift) != 0) // read from epoch drift file
++	 if (!TWFunc::Path_Exists(epoch_drift_file) || TWFunc::read_file (epoch_drift_file, drift) != 0) // optional epoch drift file
+ 		drift = 0;
+ 	#endif
+ 
+diff --git a/twrp.cpp b/twrp.cpp
+index d8221d5..b8e10a2 100644
+--- a/twrp.cpp
++++ b/twrp.cpp
+@@ -263,14 +263,16 @@ static void process_recovery_mode(twrpAdbBuFifo* adb_bu_fifo, bool skip_decrypti
+ #endif
+ 	PartitionManager.Output_Partition_Logging();
+ 
++	// RTC correction may need the per-device offset saved in recovery settings.
++#ifndef OF_ALLOW_EARLY_SETTINGS_LOAD
++	DataManager::ReadSettingsFile();
++#endif
++
+ 	// Fixup the RTC clock on devices which require it
+ 	if (crash_counter == 0)
+ 		TWFunc::Fixup_Time_On_Boot();
+ 
+ 	TWFunc::Update_Log_File();
+-#ifndef OF_ALLOW_EARLY_SETTINGS_LOAD
+-	DataManager::ReadSettingsFile();
+-#endif
+ 
+ 	// Run any outstanding OpenRecoveryScript
+ 	std::string cacheDir = TWFunc::get_log_dir();
+@@ -512,6 +514,15 @@ int main(int argc, char **argv) {
+      	}
+ 		 
+   	DataManager::SetValue("FOX_BUILD_DATE_REAL", fox_build_date);
++	// fox.cfg records the recovery build time in UTC, independent of the RTC.
++	std::string build_date_display = fox_build_date;
++	struct tm build_tm = {};
++	if (strptime(fox_build_date.c_str(), "%a %b %d %H:%M:%S %Y", &build_tm)) {
++		char date_buf[40];
++		strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M UTC", &build_tm);
++		build_date_display = date_buf;
++	}
++	DataManager::SetValue("fox_build_date_display", build_date_display);
+ 
+   	// Set the start date to the recovery's build date
+   	TWFunc::Reset_Clock();
+@@ -525,6 +536,9 @@ int main(int argc, char **argv) {
+ 
+ 	// Load default values to set DataManager constants and handle ifdefs
+ 	DataManager::SetDefaultValues();
++	printf("Device: %s (%s) | Maintainer: %s\n",
++		DataManager::GetStrValue("fox_device_model").c_str(), Fox_Current_Device.c_str(),
++		OF_MAINTAINER);
+ 
+ 	startupArgs startup;
+ 	startup.parse(&argc, &argv);
+diff --git a/twrpApex.cpp b/twrpApex.cpp
+index 557283b..a0bf115 100755
+--- a/twrpApex.cpp
++++ b/twrpApex.cpp
+@@ -97,29 +97,34 @@ bool twrpApex::mountApexOnLoopbackDevices(std::vector<std::string> apexFiles) {
+ 		return false;
+ 	}
+ 
+-	size_t device_no = 0;
+ 	for (auto&& apexFile:apexFiles) {
+-		int num = ioctl(fd, LOOP_CTL_GET_FREE);
+-		std::string loop_device = LOOP_BLOCK_DEVICE_DIR;
+-		loop_device = loop_device + "loop" + std::to_string(num);
+-		if (!TWFunc::Path_Exists(loop_device)) {
+-			int ret = mknod(loop_device.c_str(), S_IFBLK | S_IRUSR | S_IWUSR , makedev(7, device_no));
+-			if (ret != 0) {
+-				LOGERR("Unable to create loop device: %s\n", loop_device.c_str());
+-				return false;
+-			}
+-		}
+ 		std::string fileToMount = unzipImage(apexFile);
+ 		if (fileToMount.empty()) {
+ 			LOGINFO("Skipping non-existent apex file: %s\n", apexFile.c_str());
+ 			continue;
+ 		}
+-		bool load_result = loadApexImage(fileToMount, device_no);
++		int num = ioctl(fd, LOOP_CTL_GET_FREE);
++		if (num < 0) {
++			LOGERR("Unable to allocate loop device: %s\n", strerror(errno));
++			close(fd);
++			return false;
++		}
++		std::string loop_device = LOOP_BLOCK_DEVICE_DIR;
++		loop_device = loop_device + "loop" + std::to_string(num);
++		// Let ueventd create the node with the kernel's actual minor number;
++		// kernels with loop partitions do not use the loop index as the minor.
++		if (!TWFunc::Wait_For_File(loop_device, std::chrono::seconds(1))) {
++			LOGERR("Unable to find loop device: %s\n", loop_device.c_str());
++			close(fd);
++			return false;
++		}
++		bool load_result = loadApexImage(fileToMount, num);
+ 		if (!load_result) {
++			close(fd);
+ 			return false;
+ 		}
+-		device_no++;
+ 	}
++	close(fd);
+ 	return true;
+ }
+ 
+@@ -152,39 +157,46 @@ bool twrpApex::loadApexImage(std::string fileToMount, size_t loop_device_number)
+ 
+ 	memset(&info, 0, sizeof(struct loop_info64));
+ 	strlcpy((char*)info.lo_crypt_name, "twrpApex", LO_NAME_SIZE);
+-	off_t apex_size = lseek(fd, 0, SEEK_END);
+-	info.lo_sizelimit = apex_size;
++	// A zero size limit maps the entire payload. fd has already been closed;
++	// seeking it returned -1 and turned the size limit into UINT64_MAX.
+ 	if (ioctl(loop_fd, LOOP_SET_STATUS64, &info)) {
+ 		LOGERR("failed to mount loop: %s: %s\n", fileToMount.c_str(), strerror(errno));
++		ioctl(loop_fd, LOOP_CLR_FD, 0);
+ 		close(loop_fd);
+ 		return false;
+ 	}
+ 	if (ioctl(loop_fd, BLKFLSBUF, 0) == -1) {
+ 		LOGERR("Unable to flush loop device buffers\n");
++		ioctl(loop_fd, LOOP_CLR_FD, 0);
++		close(loop_fd);
+ 		return false;
+ 	}
+ 	if (ioctl(loop_fd, LOOP_SET_BLOCK_SIZE, 4096) == -1) {
+ 		LOGINFO("Failed to set DIRECT_IO buffer size\n");
+ 	}
+-	close(loop_fd);
+ 
+ 	std::string bind_mount(APEX_BASE);
+ 	std::string apex_cleaned_mount = fileToMount;
+-	apex_cleaned_mount = std::regex_replace(apex_cleaned_mount, std::regex("\\.apex"), "");
++	apex_cleaned_mount = std::regex_replace(apex_cleaned_mount, std::regex("\\.apex$"), "");
+ 
+ 	bind_mount = bind_mount + basename(apex_cleaned_mount.c_str());
+ 
+-	int ret = mkdir(bind_mount.c_str(), 0666);
+-	if (ret != 0) {
++	int ret = mkdir(bind_mount.c_str(), 0755);
++	if (ret != 0 && errno != EEXIST) {
+ 		LOGERR("Unable to create bind mount directory: %s\n", bind_mount.c_str());
++		ioctl(loop_fd, LOOP_CLR_FD, 0);
++		close(loop_fd);
+ 		return false;
+ 	}
+ 
+ 	ret = mount(loop_device.c_str(), bind_mount.c_str(), "ext4", MS_RDONLY, nullptr);
+ 	if (ret != 0) {
+ 		LOGERR("unable to mount loop device %s to %s. Reason: %s\n", loop_device.c_str(), bind_mount.c_str(), strerror(errno));
++		ioctl(loop_fd, LOOP_CLR_FD, 0);
++		close(loop_fd);
+ 		return false;
+ 	}
++	close(loop_fd);
+ 
+ 	return true;
+ }

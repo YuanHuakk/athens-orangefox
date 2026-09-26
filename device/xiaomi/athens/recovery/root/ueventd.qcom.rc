@@ -1,0 +1,42 @@
+# Recovery ueventd rules, installed as /vendor/etc/ueventd.rc.
+#
+# This file replaces the vendor's own, and ueventd runs it alone: the stock
+# /vendor/etc/ueventd.rc carries ~40 device rules the base Android one does not,
+# so anything the recovery-side hardware stack opens has to be listed here too.
+#
+# The drmrpc block below is what the TEE stack needs. Stock grants these nodes to
+# group drmrpc and starts the keymint HAL as system:drmrpc for exactly that
+# reason; without the rules the nodes keep their kernel default of root:root
+# 0600, and the keymint HAL fails to open the TEE with EACCES. qseecomd also
+# drops to system after startup, so its RPMB node needs the stock ownership.
+# drmrpc is AID 1026 and resolves from init's
+# built-in table, so it does not need a /vendor/etc/passwd entry.
+firmware_directories /apex/com.xiaomi.wifi/etc/firmware/ /data/vendor/bdf/ /vendor/firmware_mnt/image/ /vendor/modem_firmware/image/ /vendor/soccp_firmware/image/ /vendor/dcp_firmware/image/ /odm/firmware /vendor/firmware /lib/firmware
+
+/dev/dri/* 0660 root graphics
+/dev/input/* 0660 root input
+/dev/uinput 0660 root input
+/dev/xiaomi-touch 0660 root input
+/sys/class/backlight/panel0-backlight brightness 0660 root graphics
+
+subsystem dma_heap
+    devname uevent_devpath
+    dirname /dev/dma_heap
+subsystem mem_buf_vm
+    devname uevent_devpath
+    dirname /dev/mem_buf_vm
+
+/dev/qseecom              0660   system     drmrpc
+/dev/qce                  0660   system     drmrpc
+/dev/smcinvoke            0660   system     drmrpc
+/dev/qsee_ipc_irq_spss    0660   system     drmrpc
+/dev/pft                  0660   system     drmrpc
+
+# UFS RPMB listener used by qseecomd for TEE secure storage.
+/dev/0:0:0:49476           0600   system     system
+/dev/nq-nci               0660   nfc        nfc
+
+/dev/ion                  0664   system     system
+/dev/membuf               0664   system     system
+/dev/mem_buf_vm/*         0444   system     system
+/dev/dma_heap/qcom,*      0444   system     system

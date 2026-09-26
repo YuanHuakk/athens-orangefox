@@ -1,0 +1,12 @@
+# Build output, if the tree is ever built inside a checkout of this repository.
+out/
+.repo/
+
+# Recovery images and flashable zips are build products, never sources. They are
+# around 100 MB each and belong in a Release, not in history.
+*.img
+*.zip
+
+# Editor and OS noise.
+*.swp
+.DS_Store

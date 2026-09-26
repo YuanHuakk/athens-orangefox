@@ -1,0 +1,8 @@
+# Override the packaged generic service with the stock QTI implementation.
+# Athens stores slot state in GPT, not the generic misc boot_control structure.
+service vendor.boot-default /system/bin/hw/android.hardware.boot-service.qti.recovery
+    class early_hal
+    user root
+    group root
+    seclabel u:r:recovery:s0
+    interface aidl android.hardware.boot.IBootControl/default

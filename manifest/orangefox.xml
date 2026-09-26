@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OrangeFox fox_16.0 overlay for the twrp-16 minimal manifest.
+
+  Base tree : TWRP-Test/platform_manifest_twrp_aosp @ twrp-16.0 (392 effective projects)
+  Overlay   : gitlab.com/OrangeFox/* @ fox_16.0 (official, public branches)
+
+  The official OrangeFox Android 16 entry point (repo init -u
+  https://gitlab.com/OrangeFox/Manifest.git -b fox_16.0) is not anonymously
+  reachable and returns 404 for authenticated non-members, so the same project
+  set is reconstructed here against the public per-component branches.
+  Every project below is an official OrangeFox repository; only this file is local.
+
+  vendor/recovery follows the official README, which pins the unified 'main'
+  branch rather than fox_16.0.
+-->
+<manifest>
+
+  <remote name="fox" fetch="https://gitlab.com/OrangeFox/" />
+  <remote name="teamwin" fetch="https://github.com/TeamWin/" />
+
+  <!-- ============================================================
+       Overrides: replace the TWRP fork of each component with the
+       OrangeFox fox_16.0 fork. remove-project matches the project
+       name used by the twrp-16 minimal manifest.
+       ============================================================ -->
+
+  <!-- OrangeFox's build/make fork carries the image-build hooks that call the
+       vendor tree (Fox_Before_Recovery_Image / Fox_After_Recovery_Image).
+       Without it the vendor scripts never run.
+       The <linkfile> children MUST be repeated here: remove-project drops the
+       whole <project> element, and repo only creates linkfiles declared on the
+       element that wins. Omitting them silently leaves build/envsetup.sh,
+       build/core, build/target, build/tools and the root Android.bp absent. -->
+  <remove-project name="android_build" />
+  <project path="build/make" name="build/make" remote="fox" revision="fox_16.0">
+    <linkfile src="CleanSpec.mk" dest="build/CleanSpec.mk" />
+    <linkfile src="buildspec.mk.default" dest="build/buildspec.mk.default" />
+    <linkfile src="core" dest="build/core" />
+    <linkfile src="envsetup.sh" dest="build/envsetup.sh" />
+    <linkfile src="target" dest="build/target" />
+    <linkfile src="tools" dest="build/tools" />
+  </project>
+
+  <!-- vendor/twrp provides config/common.mk, which twrp_<device>.mk inherits. -->
+  <remove-project name="android_vendor_twrp" />
+  <project path="vendor/twrp" name="vendor/twrp" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_bootable_recovery" />
+  <project path="bootable/recovery" name="bootable/Recovery" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_system_core" />
+  <project path="system/core" name="system/core" remote="fox" revision="fox_16.0" />
+
+  <!-- Must move together with system/core. update_engine calls into
+       android::snapshot::ISnapshotManager, whose method set differs between the
+       two forks: fox_16.0 has UpdateUsesCompression(), twrp-16.0 renamed it to
+       UpdateUsesSnapuserd(). Mixing this pair fails to compile
+       aosp/dynamic_partition_control_android.cc. -->
+  <remove-project name="android_system_update_engine" />
+  <project path="system/update_engine" name="system/update_engine" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_system_vold" />
+  <project path="system/vold" name="system/vold" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_system_security" />
+  <project path="system/security" name="system/security" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_system_sepolicy" />
+  <project path="system/sepolicy" name="system/sepolicy" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_system_extras" />
+  <project path="system/extras" name="system/extras" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_system_libhidl" />
+  <project path="system/libhidl" name="system/libhidl" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_build_soong" />
+  <project path="build/soong" name="build/soong" remote="fox" revision="fox_16.0">
+    <linkfile src="root.bp" dest="Android.bp" />
+    <linkfile src="bootstrap.bash" dest="bootstrap.bash" />
+  </project>
+
+  <remove-project name="android_bionic" />
+  <project path="bionic" name="bionic" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_hardware_interfaces" />
+  <project path="hardware/interfaces" name="hardware/interfaces" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_frameworks_hardware_interfaces" />
+  <project path="frameworks/hardware/interfaces" name="frameworks/hardware/interfaces" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="platform/packages/modules/Connectivity" />
+  <project path="packages/modules/Connectivity" name="packages/modules/Connectivity" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="platform/external/libfuse" />
+  <project path="external/libfuse" name="external/libfuse" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_external_zstd" />
+  <project path="external/zstd" name="external/zstd" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_external_sqlite" />
+  <project path="external/sqlite" name="external/sqlite" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_external_libxml2" />
+  <project path="external/libxml2" name="external/libxml2" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_external_icu" />
+  <project path="external/icu" name="external/icu" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_external_libchrome" />
+  <project path="external/libchrome" name="external/libchrome" remote="fox" revision="fox_16.0" />
+
+  <remove-project name="android_external_wpa_supplicant_8" />
+  <project path="external/wpa_supplicant_8" name="external/wpa_supplicant_8" remote="fox" revision="fox_16.0" />
+
+  <!-- ============================================================
+       Additions: OrangeFox vendor tree, recovery build dependencies,
+       and qcom commons. Not present in the twrp-16 minimal manifest.
+       ============================================================ -->
+
+  <project path="vendor/recovery" name="vendor/recovery" remote="fox" revision="main" />
+
+  <project path="external/foxcli" name="external/foxcli" remote="fox" revision="master" />
+  <project path="external/libvterm" name="external/libvterm" remote="fox" revision="fox_16.0" />
+  <project path="external/libuv" name="external/libuv" remote="fox" revision="fox_16.0" />
+  <project path="external/json-c" name="external/json-c" remote="fox" revision="fox_16.0" />
+  <project path="external/libwebsockets" name="external/libwebsockets" remote="fox" revision="fox_16.0" />
+  <project path="external/ttyd" name="external/ttyd" remote="fox" revision="fox_16.0" />
+  <project path="external/rclone" name="external/rclone" remote="fox" revision="fox_16.0" />
+  <project path="external/dnsmasq" name="external/dnsmasq" remote="fox" revision="fox_16.0" />
+
+  <!-- crates-io must be a swap at the canonical path, never an addition at a new
+       one. The base manifest already carries AOSP's copy; OrangeFox ships a
+       pre-patched snapshot of the same upstream commit (c991cad1), and Soong
+       resolves rustlibs by module name over the whole filesystem, so keeping both
+       redefines every crate and aborts the bootstrap.
+
+       OrangeFox's copy wins: external/foxcli is a "recovery: true" rust_binary
+       that links libclap / liblibc / libserde_json, and those modules only carry
+       recovery_available: true in the patched tree (see
+       external/foxcli/patches/README.md). The two trees are otherwise identical
+       apart from that flag on 10 crates, so nothing is lost by dropping AOSP's.
+
+       It has to land on external/rust/android-crates-io specifically: Soong
+       resolves visibility by directory path, and the snapshot hardcodes that path
+       in its own grants (crates/fragile/Android.bp:46 ->
+       //external/rust/android-crates-io/crates/mockall, likewise
+       crates/vsprintf/Android.bp:33, plus grants made to it from
+       external/boringssl). Checked out anywhere else, every one of those grants
+       dangles and soong_build fails. -->
+  <remove-project name="platform/external/rust/android-crates-io" />
+  <project path="external/rust/android-crates-io" name="external/android-crates-io" remote="fox" revision="fox_16.0" />
+
+  <project path="device/qcom/twrp-common" name="device/qcom-twrp-common" remote="fox" revision="fox_16.0" />
+  <project path="device/qcom/common" name="android_device_qcom_common" remote="teamwin" revision="android-14.1" />
+
+  <!-- Reference device tree shipped by the official fox_16.0 manifest
+       (Xiaomi device on the same OrangeFox release). Kept for comparison. -->
+  <project path="device/xiaomi/mondrian" name="device/mondrian" remote="fox" revision="fox_16.0" />
+
+</manifest>

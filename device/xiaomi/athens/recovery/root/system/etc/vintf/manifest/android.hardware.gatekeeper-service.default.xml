@@ -1,0 +1,23 @@
+<!--
+    Companion to android.hardware.security.keymint-service.default.xml - see that
+    file for the full chain. Same failure, second HAL:
+
+        servicemanager: Caller(pid=1386,uid=1000,sid=u:r:recovery:s0) Could not find
+        android.hardware.gatekeeper.IGatekeeper/default in the VINTF manifest.
+
+        init: Service 'vendor.gatekeeper_default' (pid 1386) exited with status 1
+
+    keymint alone unwraps the metadata-encryption key, which is what this device's
+    metadata_encryption=aes-256-xts:wrappedkey_v0 needs to mount /metadata and read
+    the key directory. Gatekeeper is the second half: it verifies the user credential
+    and hands back the auth token that gates the per-user key unwrap, so without it
+    /data decrypts only as far as the metadata layer and the credential prompt cannot
+    succeed. Both are started from init.recovery.qcom.rc and both need a fragment
+    here, since servicemanager rejects their addService the same way.
+-->
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>android.hardware.gatekeeper</name>
+        <fqname>IGatekeeper/default</fqname>
+    </hal>
+</manifest>

@@ -1,0 +1,22 @@
+diff --git a/cmds/servicemanager/Android.bp b/cmds/servicemanager/Android.bp
+index e5d7b74..c1d1709 100644
+--- a/cmds/servicemanager/Android.bp
++++ b/cmds/servicemanager/Android.bp
+@@ -73,7 +73,16 @@ cc_binary {
+     stem: "servicemanager",
+     recovery: true,
+     defaults: ["servicemanager_defaults"],
+-    init_rc: ["servicemanager.recovery.rc"],
++    // No init_rc here. The recovery ramdisk supplies its own servicemanager.rc
++    // (bootable/recovery/etc/init/servicemanager.rc, installed by
++    // bootable/recovery/etc/Android.mk), and that is the intended definition: it is
++    // the only one carrying the "on init / start servicemanager" trigger, and it runs
++    // under u:r:recovery:s0, which is what the recovery sepolicy is written for.
++    //
++    // Shipping this module's own servicemanager.recovery.rc as well puts two
++    // definitions of `service servicemanager` into /system/etc/init. The filenames
++    // differ, so there is no overwrite - init just honours whichever it reads first,
++    // which is a directory-order accident rather than a decision.
+     srcs: ["main.cpp"],
+ }
+ 

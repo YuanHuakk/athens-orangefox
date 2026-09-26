@@ -1,0 +1,134 @@
+on init
+    setprop sys.usb.configfs 1
+    setprop sys.usb.controller a600000.dwc3
+    write /sys/class/backlight/panel0-backlight/brightness 2000
+
+# Vendor module probing queues firmware loading asynchronously. Switch to
+# coordinate reporting only after the bundled athens firmware is running.
+on property:twrp.modules.loaded=true
+    start athens-touch
+    # Stock micharge enables CC toggling for OTG. Without it the port stays a
+    # sink and an attached USB drive never reaches the host controller.
+    write /sys/class/xm_power/typec/cc_toggle 1
+
+service athens-touch /system/bin/sh /system/bin/athens-touch.sh
+    user root
+    group root
+    seclabel u:r:recovery:s0
+    disabled
+    oneshot
+
+on property:ro.boot.usbcontroller=*
+    setprop sys.usb.controller ${ro.boot.usbcontroller}
+    wait /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode 1
+    write /sys/bus/platform/devices/${ro.boot.usb.dwc3_msm:-a600000.ssusb}/mode peripheral
+
+# TEE stack, needed before anything can touch the FBE keys. /data on athens sits
+# behind metadata encryption with wrappedkey_v0, so the metadata key is sealed to
+# a hardware key and only the TEE can unwrap it; recovery cannot substitute its
+# own crypto path here. qseecomd brings the transport up first, then the two AIDL
+# HALs that vold talks to:
+#
+#   vendor.keymint             unwraps the metadata-encryption key
+#   vendor.gatekeeper_default  verifies the user credential and returns the auth
+#                              token that gates the per-user key unwrap
+#
+# hlosminkdaemon is the Mink channel broker. Stock starts it unconditionally in
+# the same class as the keymint HAL, and the keymint binary carries a DT_NEEDED
+# on libminkdescriptor.so whose channel-open path goes through this daemon's
+# hlos_mink_opener socket. It is the one piece here that recovery may not
+# actually need - drop it and retest once the device confirms decryption works
+# without it.
+# Wait until both manifest probing and APEX setup have released stock /vendor.
+# Starting daemons while it is temporarily mounted can pin that mount and load
+# stock vendor libraries instead of the recovery versions.
+on property:keymaster_ver=* && property:twrp.crypto.ready=1
+    wait /dev/smcinvoke 5
+    start vendor.qseecomd
+
+on property:init.svc.vendor.qseecomd=running
+    start vendor.minkdaemon
+
+# Process_Fstab imports the installed OS/vendor patch levels before publishing
+# keymaster_ver. Starting OneKeyMint earlier makes it reject the empty vendor
+# patch level, or initialize against the recovery build's unrelated OS version.
+on property:keymaster_ver=* && property:init.svc.vendor.qseecomd=running
+    mkdir /vendor/firmware_mnt 0755 root root
+    wait /dev/block/by-name/modem${ro.boot.slot_suffix} 5
+    mount vfat /dev/block/by-name/modem${ro.boot.slot_suffix} /vendor/firmware_mnt ro uid=1000,gid=1000,dmask=227,fmask=337
+    start vendor.keymint
+    start vendor.gatekeeper_default
+    start vendor.secure_element
+    start vendor.weaver_nxp
+
+on fs
+    wait /dev/block/platform/soc/1d84000.ufshc 5
+    symlink /dev/block/platform/soc/1d84000.ufshc /dev/block/bootdevice
+
+# The recovery domain is declared permissive in system/sepolicy/private/twrp.te,
+# so these four need no policy rules of their own; seclabel is pinned to
+# u:r:recovery:s0 deliberately so they inherit that, instead of landing in
+# hal_keymint / hal_gatekeeper where recovery has no binder client rule.
+#
+# Every service is disabled: recovery's init.rc only runs class_start default and
+# class_start hal, never core or early_hal, so nothing here would start on its
+# own. The triggers above are the only start path.
+#
+# LD_LIBRARY_PATH puts /vendor/lib64 ahead of /system/lib64 for these processes.
+# Without it the linker's no-config default path order is system, odm, vendor,
+# and the AOSP-built libc++/libutils/libcrypto/libbase/libcutils in the ramdisk
+# would shadow the vendor variants these blobs were linked against.
+service vendor.qseecomd /vendor/bin/qseecomd
+    class core
+    user root
+    group root drmrpc
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+    disabled
+
+# Stock also gives this service the oem_2912 and wakelock groups, which do not
+# resolve in a recovery ramdisk, and WAKE_ALARM/BLOCK_SUSPEND capabilities that
+# recovery has no use for. It runs as system and everything it serves here also
+# runs as system, so plain group system is enough.
+service vendor.minkdaemon /vendor/bin/hlosminkdaemon
+    class early_hal
+    user system
+    group system
+    socket ssgtzd stream 0660 system system
+    socket hlos_mink_opener stream 0660 system system
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+    disabled
+
+service vendor.keymint /vendor/bin/hw/android.hardware.security.onekeymint-service-qti
+    class early_hal
+    user system
+    group system drmrpc
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+    disabled
+
+service vendor.gatekeeper_default /vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti
+    class early_hal
+    user system
+    group system
+    setenv LD_LIBRARY_PATH /vendor/lib64:/vendor/lib64/hw:/system/lib64
+    seclabel u:r:recovery:s0
+    disabled
+
+service vendor.weaver_nxp /system/bin/hw/android.hardware.weaver-service.athens
+    class hal
+    user system
+    group system
+    seclabel u:r:recovery:s0
+    interface aidl android.hardware.weaver.IWeaver/default
+    disabled
+
+service vendor.secure_element /vendor/bin/hw/android.hardware.secure_element-service.qti
+    class hal
+    user system
+    group system nfc
+    setenv LD_LIBRARY_PATH /vendor/lib64/hw:/vendor/lib64:/system/lib64
+    seclabel u:r:recovery:s0
+    interface aidl android.hardware.secure_element.ISecureElement/eSE1
+    disabled

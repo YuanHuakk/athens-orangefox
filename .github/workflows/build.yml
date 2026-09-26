@@ -1,0 +1,212 @@
+name: Build OrangeFox
+
+# Manual runs are the normal path; pushing a v* tag additionally cuts a release.
+on:
+  workflow_dispatch:
+    inputs:
+      fox_build_type:
+        description: 'FOX_BUILD_TYPE baked into the recovery binary'
+        type: choice
+        options: [Beta, Alpha, Unofficial]
+        default: Beta
+      manifest_revision:
+        description: 'Base manifest branch or SHA'
+        type: string
+        default: 'default'
+      targets:
+        description: 'Space-separated ninja targets'
+        type: string
+        default: 'adbd recoveryimage'
+      create_release:
+        description: 'Publish a GitHub Release with the artifacts'
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'device/**'
+      - 'patches/**'
+      - 'manifest/**'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    # An AOSP 16 tree is roughly 75 GB before out/ is written, and the stock
+    # runner gives us about 74 GB on /. Cap the build so a wedged sync cannot
+    # burn the 6-hour limit.
+    timeout-minutes: 350
+
+    steps:
+      # The tree does not fit without this. A shallow AOSP 16 sync is ~60 GB and
+      # out/ adds ~14 GB on top, against roughly 74 GB total on a stock runner's
+      # root filesystem. slimhub removes the preinstalled SDKs/toolchains, which
+      # is what the recovery-building community relies on.
+      - name: Free disk space
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      # Deliberately no gcc-multilib / lib32readline-dev / lib32z1-dev: those
+      # live in the i386 archive and apt fails outright on them unless
+      # `dpkg --add-architecture i386` has been run. Android 16 builds are
+      # 64-bit-host only and this product inherits core_64_bit_only.mk, so they
+      # are not needed. Keeping the list to packages that are unambiguously
+      # present also means a bad name fails here, in seconds, rather than after
+      # an hour of syncing.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl flex git gnupg gperf \
+            imagemagick libelf-dev libssl-dev libxml2 libxml2-utils lz4 lzop \
+            openjdk-17-jdk-headless pngcrush python3 rsync schedtool \
+            squashfs-tools unzip xsltproc zip zlib1g-dev zstd
+
+      # Ubuntu 24.04 no longer ships Python 2, but parts of the AOSP build
+      # still invoke a bare `python`.
+      - name: Provide python shim
+        run: |
+          sudo ln -sf /usr/bin/python3 /usr/local/bin/python
+
+      - name: Install repo
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > "$HOME/bin/repo"
+          chmod a+rx "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      # The runner has 16 GB of RAM and soong links several large binaries at
+      # once; without swap an otherwise fine build dies in the linker.
+      - name: Set up swap
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 8
+
+      - name: Report available disk
+        run: df -h / /mnt 2>/dev/null || df -h /
+
+      - name: Initialize the source tree
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tree"
+          cd "$GITHUB_WORKSPACE/tree"
+          git config --global user.name  "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git config --global color.ui false
+          # The OrangeFox Android 16 entry point is
+          #   repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_16.0
+          # but that remote is not anonymously reachable. The twrp-16 minimal
+          # manifest is public, and manifest/orangefox.xml swaps every component
+          # OrangeFox forks back to its public per-component fox_16.0 branch.
+          #
+          # The base manifest pins most projects to refs/tags/android-16.0.0_r1,
+          # so the only thing that floats is the manifest branch itself - pass a
+          # SHA in manifest_revision to pin that too. Verified against
+          # 6f074703a0ab31f22518b1a94331b358190237ba.
+          repo init --depth=1 \
+            -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git \
+            -b "${{ inputs.manifest_revision || 'default' }}"
+
+      - name: Apply the OrangeFox overlay manifest
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tree/.repo/local_manifests"
+          cp "$GITHUB_WORKSPACE/manifest/orangefox.xml" \
+             "$GITHUB_WORKSPACE/tree/.repo/local_manifests/orangefox.xml"
+
+      - name: Sync sources
+        run: |
+          cd "$GITHUB_WORKSPACE/tree"
+          # -c/--current-branch fetches only the revision the manifest names,
+          # which is a large saving on a tree this size. Nothing here needs the
+          # other branches.
+          repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags
+
+      - name: Install the device tree
+        run: |
+          # -a so the six vendor binaries under recovery/root keep their
+          # executable bit; without it init cannot start qseecomd and
+          # decryption fails at runtime rather than at build time.
+          cp -a "$GITHUB_WORKSPACE/device/xiaomi/athens" \
+                "$GITHUB_WORKSPACE/tree/device/xiaomi/athens"
+
+      - name: Apply patches to upstream projects
+        run: |
+          cd "$GITHUB_WORKSPACE/tree/bootable/recovery"
+          git apply "$GITHUB_WORKSPACE/patches/0001-recovery-athens.patch"
+          cd "$GITHUB_WORKSPACE/tree/frameworks/native"
+          git apply "$GITHUB_WORKSPACE/patches/0002-frameworks-native-servicemanager-rc.patch"
+          # Fail loudly here rather than shipping a build that silently lacks
+          # the athens changes.
+          cd "$GITHUB_WORKSPACE/tree/bootable/recovery"
+          git apply --reverse --check "$GITHUB_WORKSPACE/patches/0001-recovery-athens.patch"
+
+      - name: Build
+        env:
+          FOX_BUILD_TYPE: ${{ inputs.fox_build_type || 'Beta' }}
+          TARGETS: ${{ inputs.targets || 'adbd recoveryimage' }}
+        run: |
+          cd "$GITHUB_WORKSPACE/tree"
+          # The exports must come before envsetup.sh is sourced. envsetup.sh
+          # sources the device tree's vendorsetup.sh, which keys off
+          # FOX_BUILD_DEVICE to export FOX_AB_DEVICE, FOX_VIRTUAL_AB_DEVICE and
+          # the bundled shell/binary flags. Export them afterwards and the
+          # recovery silently builds as a non-A/B device.
+          export LC_ALL=C
+          export FOX_BUILD_DEVICE=athens
+          # shellcheck disable=SC1091
+          . build/envsetup.sh
+          lunch twrp_athens-bp2a-eng
+          # adbd is a separate target here, not a side effect of recoveryimage.
+          # shellcheck disable=SC2086
+          mka $TARGETS
+
+      - name: Collect artifacts
+        run: |
+          out="$GITHUB_WORKSPACE/out"
+          src="$GITHUB_WORKSPACE/tree/out/target/product/athens"
+          mkdir -p "$out"
+          # recovery.img is byte-identical to OrangeFox-*.img, so it is not
+          # collected separately.
+          find "$src" -maxdepth 1 -name 'OrangeFox-*' -type f \
+               -exec cp -v {} "$out/" \;
+          # TWRP writes these sidecars with the absolute build-machine path,
+          # which makes `md5sum -c` fail for anyone who downloads them.
+          # Re-emit with bare filenames so they are actually usable.
+          cd "$out"
+          for f in OrangeFox-*.md5; do
+            [ -e "$f" ] || continue
+            md5sum "${f%.md5}" > "$f"
+          done
+          ls -la
+
+      - name: Report checksums
+        run: |
+          cd "$GITHUB_WORKSPACE/out"
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-${{ inputs.fox_build_type || 'Beta' }}-athens
+          path: |
+            out/OrangeFox-*
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('athens-{0}', github.run_number) }}
+          generate_release_notes: true
+          files: |
+            out/OrangeFox-*
+            out/SHA256SUMS.txt

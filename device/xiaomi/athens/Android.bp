@@ -1,0 +1,26 @@
+// A native Weaver path for recovery, where the Java OMAPI service is absent.
+cc_binary {
+    name: "android.hardware.weaver-service.athens",
+    recovery: true,
+    relative_install_path: "hw",
+    srcs: [
+        ":nxp_weaver_recovery_sources",
+        ":nxp_ese_recovery_transport_sources",
+    ],
+    include_dirs: [
+        "hardware/nxp/weaver/aidl_impl",
+        "hardware/nxp/weaver/libese_weaver/inc",
+        "hardware/nxp/keymint/transport/include",
+    ],
+    cflags: ["-DINTERVAL_TIMER", "-DNXP_EXTNS"],
+    cppflags: ["-fexceptions"],
+    shared_libs: [
+        "android.hardware.weaver-V2-ndk",
+        "android.hardware.secure_element-V1-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "liblog",
+        "libutils",
+    ],
+}
