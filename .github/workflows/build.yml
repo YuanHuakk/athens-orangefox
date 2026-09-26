@@ -36,16 +36,18 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    # An AOSP 16 tree is roughly 75 GB before out/ is written, and the stock
-    # runner gives us about 74 GB on /. Cap the build so a wedged sync cannot
-    # burn the 6-hour limit.
+    # Measured on the first run: this image reports 145 GB on /, 130 GB free
+    # after the cleanup below, and the build needs about 90 GB of it (18 GB
+    # .repo + 58 GB checkout + 14 GB out). So it fits with room to spare. Cap
+    # the job anyway so a wedged sync cannot burn the 6-hour limit.
     timeout-minutes: 350
 
     steps:
-      # The tree does not fit without this. A shallow AOSP 16 sync is ~60 GB and
-      # out/ adds ~14 GB on top, against roughly 74 GB total on a stock runner's
-      # root filesystem. slimhub removes the preinstalled SDKs/toolchains, which
-      # is what the recovery-building community relies on.
+      # Not needed to make the build fit - see the disk note on the job. Kept
+      # because it is what the recovery-building community runs and it buys
+      # headroom, but it is the single most expensive step before the sync at
+      # about 4m30s. Removing it is a one-line change if that stops being worth
+      # it.
       - name: Free disk space
         uses: rokibhasansagar/slimhub_actions@main
 
