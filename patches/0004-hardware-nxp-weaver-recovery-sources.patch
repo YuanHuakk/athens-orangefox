@@ -1,0 +1,31 @@
+diff --git a/Android.bp b/Android.bp
+index bb9b998..f2e5745 100755
+--- a/Android.bp
++++ b/Android.bp
+@@ -20,6 +20,12 @@ package {
+     default_applicable_licenses: ["hardware_nxp_weaver_license"],
+ }
+ 
++// Recovery uses the native eSE HAL without the Android OMAPI framework service.
++filegroup {
++    name: "nxp_weaver_recovery_sources",
++    srcs: ["aidl_impl/*.cpp", "libese_weaver/src/*.cpp"],
++}
++
+ license {
+     name: "hardware_nxp_weaver_license",
+     visibility: [":__subpackages__"],
+diff --git a/libese_weaver/src/weaver-transport-impl.cpp b/libese_weaver/src/weaver-transport-impl.cpp
+index 37da406..09cabf2 100644
+--- a/libese_weaver/src/weaver-transport-impl.cpp
++++ b/libese_weaver/src/weaver-transport-impl.cpp
+@@ -25,8 +25,7 @@
+ #define MAX_RETRY_COUNT 12
+ #define RETRY_DELAY_INTERVAL_SEC 1
+ #define IS_APPLET_SELECTION_FAILED(resp)                                       \
+-  (!resp.empty() && resp[0] == APP_NOT_FOUND_SW1 &&                            \
+-   resp[1] == APP_NOT_FOUND_SW2)
++  (resp.size() >= 2 && resp[0] == 0x6A && resp[1] == 0x82)
+ 
+ WeaverTransportImpl *WeaverTransportImpl::s_instance = NULL;
+ std::once_flag WeaverTransportImpl::s_instanceFlag;

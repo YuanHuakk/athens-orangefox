@@ -1,0 +1,20 @@
+diff --git a/transport/Android.bp b/transport/Android.bp
+index 58ce80a..8495c80 100644
+--- a/transport/Android.bp
++++ b/transport/Android.bp
+@@ -63,3 +63,15 @@ cc_library {
+         "libbinder_ndk",
+     ],
+ }
++
++filegroup {
++    name: "nxp_ese_recovery_transport_sources",
++    srcs: [
++        "AppletConnection.cpp",
++        "EseTransportUtils.cpp",
++        "HalToHalTransport.cpp",
++        "IntervalTimer.cpp",
++        "SBAccessController.cpp",
++        "SignalHandler.cpp",
++    ],
++}

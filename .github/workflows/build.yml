@@ -150,14 +150,39 @@ jobs:
 
       - name: Apply patches to upstream projects
         run: |
-          cd "$GITHUB_WORKSPACE/tree/bootable/recovery"
-          git apply "$GITHUB_WORKSPACE/patches/0001-recovery-athens.patch"
-          cd "$GITHUB_WORKSPACE/tree/frameworks/native"
-          git apply "$GITHUB_WORKSPACE/patches/0002-frameworks-native-servicemanager-rc.patch"
-          # Fail loudly here rather than shipping a build that silently lacks
-          # the athens changes.
-          cd "$GITHUB_WORKSPACE/tree/bootable/recovery"
-          git apply --reverse --check "$GITHUB_WORKSPACE/patches/0001-recovery-athens.patch"
+          # Each patch is a plain `git diff` taken from inside its own project,
+          # so it carries project-relative a/ b/ paths and has to be applied
+          # from that project's directory. One patch per project: a single file
+          # cannot span two git repositories.
+          #
+          # These cover every project the device tree depends on. Missing one
+          # is not always loud - the two nxp filegroups below are referenced by
+          # name from device/xiaomi/athens/Android.bp and break soong, but the
+          # interfaces and vold patches would instead ship a recovery that
+          # builds fine and cannot decrypt /data.
+          patches=(
+            bootable/recovery:0001-recovery-athens.patch
+            frameworks/native:0002-frameworks-native-servicemanager-rc.patch
+            hardware/nxp/keymint:0003-hardware-nxp-keymint-recovery-sources.patch
+            hardware/nxp/weaver:0004-hardware-nxp-weaver-recovery-sources.patch
+            hardware/interfaces:0005-hardware-interfaces-recovery-available.patch
+            system/vold:0006-system-vold-default-credential-decrypt.patch
+          )
+          for entry in "${patches[@]}"; do
+            project="${entry%%:*}"
+            name="${entry##*:}"
+            patch="$GITHUB_WORKSPACE/patches/$name"
+            # An empty patch applies cleanly and changes nothing, which is the
+            # one way this step can pass while leaving the tree unpatched.
+            if [ ! -s "$patch" ]; then
+              echo "::error::$name is empty"
+              exit 1
+            fi
+            cd "$GITHUB_WORKSPACE/tree/$project"
+            git apply "$patch"
+            git apply --reverse --check "$patch"
+            echo "applied $name to $project"
+          done
 
       - name: Build
         env:

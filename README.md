@@ -90,8 +90,12 @@ mkdir -p .repo/local_manifests && cp "$R/manifest/orangefox.xml" .repo/local_man
 repo sync -c -j"$(nproc)" --force-sync --no-clone-bundle --no-tags
 
 cp -a "$R/device/xiaomi/athens" device/xiaomi/athens
-git -C bootable/recovery apply "$R/patches/0001-recovery-athens.patch"
-git -C frameworks/native apply "$R/patches/0002-frameworks-native-servicemanager-rc.patch"
+git -C bootable/recovery   apply "$R/patches/0001-recovery-athens.patch"
+git -C frameworks/native   apply "$R/patches/0002-frameworks-native-servicemanager-rc.patch"
+git -C hardware/nxp/keymint apply "$R/patches/0003-hardware-nxp-keymint-recovery-sources.patch"
+git -C hardware/nxp/weaver  apply "$R/patches/0004-hardware-nxp-weaver-recovery-sources.patch"
+git -C hardware/interfaces apply "$R/patches/0005-hardware-interfaces-recovery-available.patch"
+git -C system/vold         apply "$R/patches/0006-system-vold-default-credential-decrypt.patch"
 
 export LC_ALL=C FOX_BUILD_DEVICE=athens FOX_BUILD_TYPE=Beta
 . build/envsetup.sh && lunch twrp_athens-bp2a-eng
