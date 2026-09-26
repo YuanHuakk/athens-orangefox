@@ -85,7 +85,7 @@ OrangeFox 官方 Android 16 manifest 不可匿名访问，故自带一份：以�
 R=~/athens-orangefox            # 本仓库
 T=~/athens-tree && mkdir -p "$T" && cd "$T"
 
-repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git -b default
+repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git -b twrp-16.0
 mkdir -p .repo/local_manifests && cp "$R/manifest/orangefox.xml" .repo/local_manifests/
 repo sync -c -j"$(nproc)" --force-sync --no-clone-bundle --no-tags
 

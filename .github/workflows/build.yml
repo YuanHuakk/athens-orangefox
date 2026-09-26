@@ -12,7 +12,7 @@ on:
       manifest_revision:
         description: 'Base manifest branch or SHA'
         type: string
-        default: 'default'
+        default: 'twrp-16.0'
       targets:
         description: 'Space-separated ninja targets'
         type: string
@@ -108,9 +108,16 @@ jobs:
           # so the only thing that floats is the manifest branch itself - pass a
           # SHA in manifest_revision to pin that too. Verified against
           # 6f074703a0ab31f22518b1a94331b358190237ba.
+          #
+          # The branch has to be named twrp-16.0. This remote has exactly two
+          # heads, lvgl and twrp-16.0, and no branch called "default" - but repo
+          # names its *local* manifest branch "default" whenever -b is omitted,
+          # so "default" is what a working checkout reports and looks like the
+          # right thing to pass back in. It is not: -b default dies here with
+          # "couldn't find remote ref refs/heads/default".
           repo init --depth=1 \
             -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git \
-            -b "${{ inputs.manifest_revision || 'default' }}"
+            -b "${{ inputs.manifest_revision || 'twrp-16.0' }}"
 
       - name: Apply the OrangeFox overlay manifest
         run: |
@@ -125,6 +132,11 @@ jobs:
           # which is a large saving on a tree this size. Nothing here needs the
           # other branches.
           repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags
+          # The tree is close to the size of the runner's filesystem, so record
+          # what it actually cost. If a later step dies on ENOSPC this is the
+          # number to look at.
+          du -sh "$GITHUB_WORKSPACE/tree" "$GITHUB_WORKSPACE/tree/.repo"
+          df -h /
 
       - name: Install the device tree
         run: |
