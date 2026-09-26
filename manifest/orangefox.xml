@@ -5,6 +5,27 @@
   Base tree : TWRP-Test/platform_manifest_twrp_aosp @ twrp-16.0 (392 effective projects)
   Overlay   : gitlab.com/OrangeFox/* @ fox_16.0 (official, public branches)
 
+  Every revision in this file is pinned to a full commit SHA, in two groups:
+
+    - the OrangeFox forks that replace a TWRP component, pinned to the tip of
+      the branch each was verified on (fox_16.0, plus 'main' for vendor/recovery
+      and 'master' for external/foxcli);
+    - the projects the base manifest still tracks by branch rather than by tag,
+      pinned in the 'Pins' section at the bottom.
+
+  Those branches all move, and a build tracking them drifts: silently, because
+  most projects only change the resulting image; loudly, for bootable/recovery,
+  hardware/interfaces and system/vold, where a moved revision can stop the
+  patch in patches/ from applying at all.
+
+  On 2026-09-26 and 2026-09-27 every pinned SHA equalled the tip of its branch,
+  so this changed nothing on those dates - it only stops the drift from starting.
+
+  To re-pin deliberately, sync with the branch names, then for each project:
+      git -C PATH rev-parse HEAD
+  and paste the SHA into revision=. repo fetches SHAs directly here; verified
+  with a shallow (depth 1) fetch against GitLab.
+
   The official OrangeFox Android 16 entry point (repo init -u
   https://gitlab.com/OrangeFox/Manifest.git -b fox_16.0) is not anonymously
   reachable and returns 404 for authenticated non-members, so the same project
@@ -33,7 +54,7 @@
        element that wins. Omitting them silently leaves build/envsetup.sh,
        build/core, build/target, build/tools and the root Android.bp absent. -->
   <remove-project name="android_build" />
-  <project path="build/make" name="build/make" remote="fox" revision="fox_16.0">
+  <project path="build/make" name="build/make" remote="fox" revision="a11b2e4720c651cd5e5fc92e92479f30196349a2">
     <linkfile src="CleanSpec.mk" dest="build/CleanSpec.mk" />
     <linkfile src="buildspec.mk.default" dest="build/buildspec.mk.default" />
     <linkfile src="core" dest="build/core" />
@@ -44,13 +65,13 @@
 
   <!-- vendor/twrp provides config/common.mk, which twrp_<device>.mk inherits. -->
   <remove-project name="android_vendor_twrp" />
-  <project path="vendor/twrp" name="vendor/twrp" remote="fox" revision="fox_16.0" />
+  <project path="vendor/twrp" name="vendor/twrp" remote="fox" revision="8df87ab1343e371a399cb02c4ff1c6f8f067138f" />
 
   <remove-project name="android_bootable_recovery" />
-  <project path="bootable/recovery" name="bootable/Recovery" remote="fox" revision="fox_16.0" />
+  <project path="bootable/recovery" name="bootable/Recovery" remote="fox" revision="6ff71bed1506fec1893247f0c74d7ae87c594eed" />
 
   <remove-project name="android_system_core" />
-  <project path="system/core" name="system/core" remote="fox" revision="fox_16.0" />
+  <project path="system/core" name="system/core" remote="fox" revision="1efa79514b2f520c20a837c9216ff6b6e7e0dda3" />
 
   <!-- Must move together with system/core. update_engine calls into
        android::snapshot::ISnapshotManager, whose method set differs between the
@@ -58,77 +79,77 @@
        UpdateUsesSnapuserd(). Mixing this pair fails to compile
        aosp/dynamic_partition_control_android.cc. -->
   <remove-project name="android_system_update_engine" />
-  <project path="system/update_engine" name="system/update_engine" remote="fox" revision="fox_16.0" />
+  <project path="system/update_engine" name="system/update_engine" remote="fox" revision="fc3665ca6ffdfba5f470e40d9f102fb908c23e61" />
 
   <remove-project name="android_system_vold" />
-  <project path="system/vold" name="system/vold" remote="fox" revision="fox_16.0" />
+  <project path="system/vold" name="system/vold" remote="fox" revision="953de9608eb78380b3c4e39e801c2bc0af7dbddc" />
 
   <remove-project name="android_system_security" />
-  <project path="system/security" name="system/security" remote="fox" revision="fox_16.0" />
+  <project path="system/security" name="system/security" remote="fox" revision="d614e274b585a67e80d3d3fbc3a6e9f695998f78" />
 
   <remove-project name="android_system_sepolicy" />
-  <project path="system/sepolicy" name="system/sepolicy" remote="fox" revision="fox_16.0" />
+  <project path="system/sepolicy" name="system/sepolicy" remote="fox" revision="9641d92817ae79b2d4cd02dfe5c24de7de2014b4" />
 
   <remove-project name="android_system_extras" />
-  <project path="system/extras" name="system/extras" remote="fox" revision="fox_16.0" />
+  <project path="system/extras" name="system/extras" remote="fox" revision="3a9f3a49acd8469faa7999800f4cfc0b2ed75ffa" />
 
   <remove-project name="android_system_libhidl" />
-  <project path="system/libhidl" name="system/libhidl" remote="fox" revision="fox_16.0" />
+  <project path="system/libhidl" name="system/libhidl" remote="fox" revision="9bb79519173ff86773dfd144172bcd789fc88e01" />
 
   <remove-project name="android_build_soong" />
-  <project path="build/soong" name="build/soong" remote="fox" revision="fox_16.0">
+  <project path="build/soong" name="build/soong" remote="fox" revision="6dc77879464584ef3f178cae622134ed0bf19e1e">
     <linkfile src="root.bp" dest="Android.bp" />
     <linkfile src="bootstrap.bash" dest="bootstrap.bash" />
   </project>
 
   <remove-project name="android_bionic" />
-  <project path="bionic" name="bionic" remote="fox" revision="fox_16.0" />
+  <project path="bionic" name="bionic" remote="fox" revision="33fcbd9974be3b3b2899a484f8c0cb8dfa2d5e82" />
 
   <remove-project name="android_hardware_interfaces" />
-  <project path="hardware/interfaces" name="hardware/interfaces" remote="fox" revision="fox_16.0" />
+  <project path="hardware/interfaces" name="hardware/interfaces" remote="fox" revision="bdefb2a8bce20dc15882d4ab668fb628c427e26b" />
 
   <remove-project name="android_frameworks_hardware_interfaces" />
-  <project path="frameworks/hardware/interfaces" name="frameworks/hardware/interfaces" remote="fox" revision="fox_16.0" />
+  <project path="frameworks/hardware/interfaces" name="frameworks/hardware/interfaces" remote="fox" revision="51d97a046f77b7dc3531cc6bb99407539d4e29b6" />
 
   <remove-project name="platform/packages/modules/Connectivity" />
-  <project path="packages/modules/Connectivity" name="packages/modules/Connectivity" remote="fox" revision="fox_16.0" />
+  <project path="packages/modules/Connectivity" name="packages/modules/Connectivity" remote="fox" revision="3f1120bc84f0d88620cabed67a49f3d939b736d7" />
 
   <remove-project name="platform/external/libfuse" />
-  <project path="external/libfuse" name="external/libfuse" remote="fox" revision="fox_16.0" />
+  <project path="external/libfuse" name="external/libfuse" remote="fox" revision="5705a51c5b2971ba56d8e1a145abf530b49de93d" />
 
   <remove-project name="android_external_zstd" />
-  <project path="external/zstd" name="external/zstd" remote="fox" revision="fox_16.0" />
+  <project path="external/zstd" name="external/zstd" remote="fox" revision="a375e4fc85612babf34c8221f825a86036175ac0" />
 
   <remove-project name="android_external_sqlite" />
-  <project path="external/sqlite" name="external/sqlite" remote="fox" revision="fox_16.0" />
+  <project path="external/sqlite" name="external/sqlite" remote="fox" revision="28e3f5878182658a5c34d3ce0859e950f2885aba" />
 
   <remove-project name="android_external_libxml2" />
-  <project path="external/libxml2" name="external/libxml2" remote="fox" revision="fox_16.0" />
+  <project path="external/libxml2" name="external/libxml2" remote="fox" revision="4d33dd4f7f03568c09c7886a6a6d07512daa8374" />
 
   <remove-project name="android_external_icu" />
-  <project path="external/icu" name="external/icu" remote="fox" revision="fox_16.0" />
+  <project path="external/icu" name="external/icu" remote="fox" revision="6fefff4e125c1b1a332fbce6d0d2da323b203865" />
 
   <remove-project name="android_external_libchrome" />
-  <project path="external/libchrome" name="external/libchrome" remote="fox" revision="fox_16.0" />
+  <project path="external/libchrome" name="external/libchrome" remote="fox" revision="ea5e82b2c1b9e741903be0dcdaf66af60b23c951" />
 
   <remove-project name="android_external_wpa_supplicant_8" />
-  <project path="external/wpa_supplicant_8" name="external/wpa_supplicant_8" remote="fox" revision="fox_16.0" />
+  <project path="external/wpa_supplicant_8" name="external/wpa_supplicant_8" remote="fox" revision="45bbb7c0537b1a9c6138ac1ac0d01b482379b1c5" />
 
   <!-- ============================================================
        Additions: OrangeFox vendor tree, recovery build dependencies,
        and qcom commons. Not present in the twrp-16 minimal manifest.
        ============================================================ -->
 
-  <project path="vendor/recovery" name="vendor/recovery" remote="fox" revision="main" />
+  <project path="vendor/recovery" name="vendor/recovery" remote="fox" revision="cea00cabf2e8ce50fc9f0b5cda99b5801855847a" />
 
-  <project path="external/foxcli" name="external/foxcli" remote="fox" revision="master" />
-  <project path="external/libvterm" name="external/libvterm" remote="fox" revision="fox_16.0" />
-  <project path="external/libuv" name="external/libuv" remote="fox" revision="fox_16.0" />
-  <project path="external/json-c" name="external/json-c" remote="fox" revision="fox_16.0" />
-  <project path="external/libwebsockets" name="external/libwebsockets" remote="fox" revision="fox_16.0" />
-  <project path="external/ttyd" name="external/ttyd" remote="fox" revision="fox_16.0" />
-  <project path="external/rclone" name="external/rclone" remote="fox" revision="fox_16.0" />
-  <project path="external/dnsmasq" name="external/dnsmasq" remote="fox" revision="fox_16.0" />
+  <project path="external/foxcli" name="external/foxcli" remote="fox" revision="ce8125d5dba50b3c03e8c674221206bb7ce5c705" />
+  <project path="external/libvterm" name="external/libvterm" remote="fox" revision="19d04214c6f276f5eae6f7bcdc1794b7dccf84bd" />
+  <project path="external/libuv" name="external/libuv" remote="fox" revision="7c3aedb62ef4b369d41b91d8a6712ebb8fe427a2" />
+  <project path="external/json-c" name="external/json-c" remote="fox" revision="79a8ff67c9ec24770b0aacf22ed779a94b1937c9" />
+  <project path="external/libwebsockets" name="external/libwebsockets" remote="fox" revision="54fcad4800229f4d75cc74a3254fdb62e2a4b4c8" />
+  <project path="external/ttyd" name="external/ttyd" remote="fox" revision="30aa1f9fc7d8500244d125ae0b3338aeb63eb498" />
+  <project path="external/rclone" name="external/rclone" remote="fox" revision="de5ab07087a9132f3f027bedcf698856a1d37d29" />
+  <project path="external/dnsmasq" name="external/dnsmasq" remote="fox" revision="b7268972ef9153562001b7be986c756d0f5490d7" />
 
   <!-- crates-io must be a swap at the canonical path, never an addition at a new
        one. The base manifest already carries AOSP's copy; OrangeFox ships a
@@ -150,13 +171,86 @@
        external/boringssl). Checked out anywhere else, every one of those grants
        dangles and soong_build fails. -->
   <remove-project name="platform/external/rust/android-crates-io" />
-  <project path="external/rust/android-crates-io" name="external/android-crates-io" remote="fox" revision="fox_16.0" />
+  <project path="external/rust/android-crates-io" name="external/android-crates-io" remote="fox" revision="46022a5c0eb60cbfc7421040ae66c679a63c49dc" />
 
-  <project path="device/qcom/twrp-common" name="device/qcom-twrp-common" remote="fox" revision="fox_16.0" />
-  <project path="device/qcom/common" name="android_device_qcom_common" remote="teamwin" revision="android-14.1" />
+  <project path="device/qcom/twrp-common" name="device/qcom-twrp-common" remote="fox" revision="98506f7919102378c8d52ee7d6a94a867f1b4c55" />
+  <project path="device/qcom/common" name="android_device_qcom_common" remote="teamwin" revision="2cf934339972feb6f711e5ad182b82157269c7f3" />
 
   <!-- Reference device tree shipped by the official fox_16.0 manifest
        (Xiaomi device on the same OrangeFox release). Kept for comparison. -->
-  <project path="device/xiaomi/mondrian" name="device/mondrian" remote="fox" revision="fox_16.0" />
+  <project path="device/xiaomi/mondrian" name="device/mondrian" remote="fox" revision="c09654508af5839c78e97e309dcffc65a735454a" />
+
+  <!-- ============================================================
+       Pins: freeze the projects the base manifest still tracks by
+       branch or tag. Pinning the base manifest to a SHA fixes which
+       projects exist; it does not fix which commit each one sits on,
+       because the branch names live in the base manifest's own text.
+
+       These all come from the base manifest, so their remote names
+       (twrp-16.0, LineageOS, github, aosp) are the base manifest's,
+       not the fox/teamwin pair declared above. Every SHA is the tip
+       of its branch as of 2026-09-27 and equals what a sync of this
+       manifest resolved to; this changes nothing today, it only stops
+       the drift from starting.
+
+       external/scrypt, system/keymaster, external/magisk-prebuilt and
+       system/libziparchive all land in the recovery image, so for
+       those four a moved branch is a different binary, not just a
+       newer one.
+       ============================================================ -->
+
+  <remove-project name="android_cts" />
+  <project path="cts" name="android_cts" remote="twrp-16.0" revision="e70f92f52c9830ee8f93d89d032e2b14765c5941" />
+
+  <remove-project name="android_external_bash" />
+  <project path="external/bash" name="android_external_bash" remote="LineageOS" revision="1094f161361ad75af92c968da680f2f5b3cf752b" />
+
+  <remove-project name="android_external_exfatprogs" />
+  <project path="external/exfatprogs" name="android_external_exfatprogs" remote="twrp-16.0" revision="32b1f77915b3ac456d5ac39a9906ae9a8fc91038" />
+
+  <remove-project name="android_external_freetype" />
+  <project path="external/freetype" name="android_external_freetype" remote="twrp-16.0" revision="e8daa090dd2a18a2d18ca6fbf3059df82031f7fa" />
+
+  <remove-project name="android_external_libmicrohttpd" />
+  <project path="external/libmicrohttpd" name="android_external_libmicrohttpd" remote="twrp-16.0" revision="37408f6e22f1fe935129e11f1a5c9a5091b4b97a" />
+
+  <remove-project name="android_external_libncurses" />
+  <project path="external/libncurses" name="android_external_libncurses" remote="twrp-16.0" revision="c750f7bae035137182c1ae8b4a133ff2c1801066" />
+
+  <remove-project name="phhusson/vendor_lptools" />
+  <project path="external/lptools" name="phhusson/vendor_lptools" remote="github" revision="c8be7de57b80eab61a6f94ec86464a01fb9056f2" />
+
+  <remove-project name="external_magisk-prebuilt" />
+  <project path="external/magisk-prebuilt" name="external_magisk-prebuilt" remote="twrp-16.0" revision="06808ed6045f6fdd7752124aba94b9698463c92c" />
+
+  <remove-project name="android_external_nano" />
+  <project path="external/nano" name="android_external_nano" remote="LineageOS" revision="b83fc23d564c5377fc7c3322e5f75e81d8dad37e" />
+
+  <remove-project name="android_external_ntfs-3g" />
+  <project path="external/ntfs-3g" name="android_external_ntfs-3g" remote="LineageOS" revision="e2415df401538976fb89aa20370903e0c46e51ff" />
+
+  <remove-project name="android_external_scrypt" />
+  <project path="external/scrypt" name="android_external_scrypt" remote="twrp-16.0" revision="6ae39e28aba54ce4e8b394213201c23df5c996ac" />
+
+  <remove-project name="android_se_omapi" />
+  <project path="external/se_omapi" name="android_se_omapi" remote="twrp-16.0" revision="4d1e09a8b18dc3e2bec644e50401e28ea695f3d1" />
+
+  <remove-project name="platform/external/ublksrv" />
+  <project path="external/ublksrv" name="platform/external/ublksrv" remote="aosp" revision="e5e6aea584863ff187b6f0d29a33bbd87c470143" />
+
+  <remove-project name="android_frameworks_base" />
+  <project path="frameworks/base" name="android_frameworks_base" remote="twrp-16.0" revision="6f7be9d065ea575a34a3e562da6e39e6ca6f594d" />
+
+  <remove-project name="android_prebuilts_tools-lineage" />
+  <project path="prebuilts/tools-lineage" name="android_prebuilts_tools-lineage" remote="LineageOS" revision="7cf9452c82a0265d00e8c444f25639b7aa66969d" />
+
+  <remove-project name="android_system_hardware_interfaces" />
+  <project path="system/hardware/interfaces" name="android_system_hardware_interfaces" remote="twrp-16.0" revision="ee6d7c54ce09cffb9808afc86fcd4828be2f077a" />
+
+  <remove-project name="android_system_keymaster" />
+  <project path="system/keymaster" name="android_system_keymaster" remote="twrp-16.0" revision="9e111ed820350961202c637b4135ff83aa06a70b" />
+
+  <remove-project name="android_system_libziparchive" />
+  <project path="system/libziparchive" name="android_system_libziparchive" remote="twrp-16.0" revision="5ad9237353b072d1d36f201f4c3aedac8e080865" />
 
 </manifest>

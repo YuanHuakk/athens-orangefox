@@ -85,9 +85,11 @@ OrangeFox 官方 Android 16 manifest 不可匿名访问，故自带一份：以�
 R=~/athens-orangefox            # 本仓库
 T=~/athens-tree && mkdir -p "$T" && cd "$T"
 
-repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git -b twrp-16.0
+repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git -b 6f074703a0ab31f22518b1a94331b358190237ba
 mkdir -p .repo/local_manifests && cp "$R/manifest/orangefox.xml" .repo/local_manifests/
-repo sync -c -j"$(nproc)" --force-sync --no-clone-bundle --no-tags
+# -j 别开太大：并发打 android.googlesource.com 会被 429 限流。真被限了就原样重跑，
+# repo sync 是续传的，已下好的不会重下。
+repo sync -c -j8 --force-sync --no-clone-bundle --no-tags
 
 cp -a "$R/device/xiaomi/athens" device/xiaomi/athens
 git -C bootable/recovery   apply "$R/patches/0001-recovery-athens.patch"
@@ -97,14 +99,24 @@ git -C hardware/nxp/weaver  apply "$R/patches/0004-hardware-nxp-weaver-recovery-
 git -C hardware/interfaces apply "$R/patches/0005-hardware-interfaces-recovery-available.patch"
 git -C system/vold         apply "$R/patches/0006-system-vold-default-credential-decrypt.patch"
 
-export LC_ALL=C FOX_BUILD_DEVICE=athens FOX_BUILD_TYPE=Beta
+# Ubuntu 24.04 起不再提供 python，但 AOSP 仍有脚本直接调 `python`。
+mkdir -p ~/bin && ln -sf /usr/bin/python3 ~/bin/python
+
+export PATH=~/bin:$PATH LC_ALL=C FOX_BUILD_DEVICE=athens FOX_BUILD_TYPE=Beta
 . build/envsetup.sh && lunch twrp_athens-bp2a-eng
 mka adbd recoveryimage
 ```
 
+源码全程约 **75 GB**；`repo sync` 实测约 12 分钟（16 线程、`--depth=1`）。
+
 - `export` 必须在 `. build/envsetup.sh` **之前**，否则会静默构建成非 A/B 设备
 - **别把 `FOX_BUILD_TYPE` 设成 `Stable`** —— 会静默拆掉 adbd / MTP / sideload。用 `Beta`
-- 需要约 75 GB 磁盘；32 GB 内存较舒适，27 GB 需加 swap
+- **别用 `set -u` 包这些命令**：`build/envsetup.sh` 在定义 `TOP` 之前就读它，nounset 会让它
+  在第 21 行直接退出
+- **整棵树没有浮动引用**：base manifest 钉到 `6f074703`；`manifest/orangefox.xml` 里
+  53 个项目钉到具体 SHA（35 个 OrangeFox 分叉 + 18 个底包仍在跟分支的）；
+  其余 351 个继承底包的 `refs/tags/android-16.0.0_r1`，是不可变 tag。要升版本改这几处
+- 内存 32 GB 较舒适，27 GB 需加 swap
 
 补丁为什么这么改，理由都写在补丁注释里；设备树各非显然取值的理由写在
 `device/xiaomi/athens/BoardConfig.mk`。
