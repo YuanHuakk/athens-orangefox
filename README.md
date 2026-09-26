@@ -76,7 +76,7 @@ OrangeFox 官方 Android 16 manifest 不可匿名访问，故自带一份：以�
 
 ## 构建
 
-**CI** — Actions → *Build OrangeFox* → *Run workflow*。默认出 `Beta`，产物在 run 页面下载；
+**CI** — Actions → _Build OrangeFox_ → _Run workflow_。默认出 `Beta`，产物在 run 页面下载；
 勾选 `create_release` 或推 `v*` tag 会发 Release。
 
 **本地** —
@@ -107,7 +107,14 @@ mka adbd recoveryimage
 
 ---
 
-## 鸣谢
+## 鸣谢与许可
 
-基于 [TeamWin Recovery Project](https://github.com/TeamWin) 与
-[OrangeFox Recovery Project](https://gitlab.com/OrangeFox)。GPLv3。
+**GPLv3-or-later**，全文见 [LICENSE](LICENSE)。
+
+- `device/xiaomi/athens/`、`patches/0001-recovery-athens.patch` —— 修改自
+  [TeamWin Recovery Project](https://github.com/TeamWin) 与
+  [OrangeFox Recovery Project](https://gitlab.com/OrangeFox)（GPLv3-or-later）。
+  上游版权：`Copyright (c) 2011-2016, Dees_Troy, bigbiff, Team Win` /
+  `Copyright (c) 2018-2020, MrYacha, DarthJabba9, OrangeFox Recovery Team`
+- `patches/0002-frameworks-native-servicemanager-rc.patch` —— 修改自 AOSP
+  `frameworks/native`（Apache-2.0，可并入 GPLv3），版权归 The Android Open Source Project
