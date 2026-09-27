@@ -11,22 +11,27 @@
 /system_dlkm erofs /dev/block/mapper/system_dlkm flags=display="System DLKM";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
 /mi_ext erofs /dev/block/mapper/mi_ext flags=display="MI EXT";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
 
-/boot emmc /dev/block/by-name/boot flags=display="Boot";slotselect;backup=1;flashimg=0
-/init_boot emmc /dev/block/by-name/init_boot flags=display="Init Boot";slotselect;backup=1;flashimg=0
-/vendor_boot emmc /dev/block/by-name/vendor_boot flags=display="Vendor Boot";slotselect;backup=1;flashimg=0
-/recovery emmc /dev/block/by-name/recovery flags=display="Recovery";slotselect;backup=1;flashimg=0
-/dtbo emmc /dev/block/by-name/dtbo flags=display="DTBO";slotselect;backup=1;flashimg=0
+/boot emmc /dev/block/by-name/boot flags=display="Boot";slotselect;backup=1;flashimg=1
+/init_boot emmc /dev/block/by-name/init_boot flags=display="Init Boot";slotselect;backup=1;flashimg=1
+/vendor_boot emmc /dev/block/by-name/vendor_boot flags=display="Vendor Boot";slotselect;backup=1;flashimg=1
+/recovery emmc /dev/block/by-name/recovery flags=display="Recovery";slotselect;backup=1;flashimg=1
+/dtbo emmc /dev/block/by-name/dtbo flags=display="DTBO";slotselect;backup=1;flashimg=1
 /misc emmc /dev/block/by-name/misc flags=display="Misc";backup=0;flashimg=0
 
-# vbmeta and vbmeta_system are the two entries that are deliberately flashimg=1
-# while every other boot-chain partition above is flashimg=0. athens runs with
-# AVB enforced (vbmeta flags=0, SHA256_RSA4096) and the stock fstab only reaches
-# these partitions indirectly, through avb=vbmeta / avb=vbmeta_system on the
-# logical and boot entries - they were never named in /etc/recovery.fstab, so
-# the recovery could not offer them as image targets at all. Both exist in the
-# GPT as _a/_b pairs of 0.1 MiB. Keep the rest of the boot chain non-flashable:
-# OrangeFox's installer writes those from the ROM zip, and a stray manual write
-# to boot/_b is not recoverable on an anti_version=1 device.
+# Every boot-chain entry above is flashimg=1, which is what puts it in the image
+# installer's target list: Magisk patches init_boot, a third-party kernel lands
+# in boot or vendor_boot, and a bad AVB pair is repaired through vbmeta. athens
+# runs with AVB enforced (vbmeta flags=0, SHA256_RSA4096) and the stock fstab
+# only reaches vbmeta and vbmeta_system indirectly, through avb=vbmeta /
+# avb=vbmeta_system on the logical and boot entries - they were never named in
+# /etc/recovery.fstab, so the recovery could not offer them as image targets at
+# all. Both exist in the GPT as _a/_b pairs of 0.1 MiB.
+#
+# slotselect writes the active slot and anti_version=1 leaves no rollback, so
+# the protection here is the backup, not the flag: every flashable entry above
+# carries backup=1, which is what lets Boot or Init Boot be saved before
+# something is written over it. /misc is the one entry above left at
+# flashimg=0 - nothing installs an image into it.
 /vbmeta emmc /dev/block/by-name/vbmeta flags=display="VBMeta";slotselect;backup=1;flashimg=1
 /vbmeta_system emmc /dev/block/by-name/vbmeta_system flags=display="VBMeta System";slotselect;backup=1;flashimg=1
 
