@@ -119,7 +119,26 @@ OF_FL_PATH1 := /sys/class/leds/amber:flash-2
 # The RTC is a counter, not Unix time. Use OrangeFox's saved per-device drift.
 TARGET_RECOVERY_QCOM_RTC_FIX := true
 OF_USE_LEGACY_TIME_FIXUP := 1
-# Allow OrangeFox's configurable screen timeout (60 seconds by default).
+# Screen timeout and the lockscreen are coupled, and the coupling is a trap.
+# gui/blanktimer.cpp guards BOTH checkForTimeout() and resetTimerAndUnblank()
+# behind TW_NO_SCREEN_TIMEOUT, while gui.cpp's toggleBlank() (power key) is not
+# guarded. So defining the macro stops the screen timing out but also compiles
+# out the only path that dismisses the lockscreen - press power once and the
+# device is stuck there with no way back into the UI.
+#
+# TW_NO_SCREEN_TIMEOUT must therefore stay UNDEFINED, and undefined means absent:
+# bootable/recovery/Android.mk tests it with `ifneq ($(TW_NO_SCREEN_TIMEOUT),)`,
+# which is true for any non-empty value, so `:= false` would trip the same trap
+# as `:= true`. Do not add the variable in any form.
+#
+# Two consequences follow, and both are handled elsewhere:
+#   - The timeout stays at its 60 second default and the lockscreen still
+#     appears. OF_USE_LOCKSCREEN_BUTTON below gives it a tap target, because
+#     the drag-up gesture is unreliable while the touch driver is in raw
+#     reporting mode (see athens-touch.sh).
+#   - Anyone who wants the screen to stop timing out entirely has to change the
+#     default value in the source instead of using the macro. The sibling
+#     myron/songyuan trees do that with a build-time patch to blanktimer.cpp.
 TW_INCLUDE_REPACKTOOLS := false
 
 # USB. TWRP's own etc/init.rc builds the recovery gadget whenever
@@ -182,6 +201,11 @@ TW_DEVICE_VERSION := v1.0
 
 # OrangeFox
 OF_MAINTAINER := YuanHuakk
+# Puts a tappable unlock button on the lockscreen. Unlocking by swiping is a
+# drag gesture, and the touch driver drops drags while it is in raw reporting
+# mode, so a swipe-only lockscreen can strand the user. See the screen timeout
+# block above for why the lockscreen cannot simply be disabled instead.
+OF_USE_LOCKSCREEN_BUTTON := 1
 # athens is A/B *and* keeps a dedicated recovery partition, so the installer must
 # not treat it as a recovery-as-boot/vendor_boot-recovery device.
 OF_AB_DEVICE_WITH_RECOVERY_PARTITION := 1

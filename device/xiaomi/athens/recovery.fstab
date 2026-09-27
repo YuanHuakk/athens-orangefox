@@ -2,30 +2,50 @@
 # fstab.qcom. TWRP reads fileencryption/metadata_encryption/keydirectory off this
 # file to drive decryption; the HALs that unwrap the keys are staged under
 # recovery/root/vendor and started from init.recovery.qcom.rc.
-/system_root erofs /dev/block/mapper/system flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/system_ext erofs /dev/block/mapper/system_ext flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/product erofs /dev/block/mapper/product flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/vendor erofs /dev/block/mapper/vendor flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/odm erofs /dev/block/mapper/odm flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/vendor_dlkm erofs /dev/block/mapper/vendor_dlkm flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/system_dlkm erofs /dev/block/mapper/system_dlkm flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
-/mi_ext erofs /dev/block/mapper/mi_ext flags=logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/system_root erofs /dev/block/mapper/system flags=display="System";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/system_ext erofs /dev/block/mapper/system_ext flags=display="System EXT";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/product erofs /dev/block/mapper/product flags=display="Product";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/vendor erofs /dev/block/mapper/vendor flags=display="Vendor";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/odm erofs /dev/block/mapper/odm flags=display="ODM";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/vendor_dlkm erofs /dev/block/mapper/vendor_dlkm flags=display="Vendor DLKM";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/system_dlkm erofs /dev/block/mapper/system_dlkm flags=display="System DLKM";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
+/mi_ext erofs /dev/block/mapper/mi_ext flags=display="MI EXT";logical;slotselect;backup=0;canbewiped=0;wipeingui=0;fsflags=ro
 
-/boot emmc /dev/block/by-name/boot flags=slotselect;backup=1;flashimg=0
-/init_boot emmc /dev/block/by-name/init_boot flags=slotselect;backup=1;flashimg=0
-/vendor_boot emmc /dev/block/by-name/vendor_boot flags=slotselect;backup=1;flashimg=0
-/recovery emmc /dev/block/by-name/recovery flags=slotselect;backup=1;flashimg=0
-/dtbo emmc /dev/block/by-name/dtbo flags=slotselect;backup=1;flashimg=0
-/misc emmc /dev/block/by-name/misc flags=backup=0;flashimg=0
+/boot emmc /dev/block/by-name/boot flags=display="Boot";slotselect;backup=1;flashimg=0
+/init_boot emmc /dev/block/by-name/init_boot flags=display="Init Boot";slotselect;backup=1;flashimg=0
+/vendor_boot emmc /dev/block/by-name/vendor_boot flags=display="Vendor Boot";slotselect;backup=1;flashimg=0
+/recovery emmc /dev/block/by-name/recovery flags=display="Recovery";slotselect;backup=1;flashimg=0
+/dtbo emmc /dev/block/by-name/dtbo flags=display="DTBO";slotselect;backup=1;flashimg=0
+/misc emmc /dev/block/by-name/misc flags=display="Misc";backup=0;flashimg=0
 
-/data f2fs /dev/block/by-name/userdata flags=fsflags=noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier,inlinecrypt;fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0;metadata_encryption=aes-256-xts:wrappedkey_v0;keydirectory=/metadata/vold/metadata_encryption;wrappedkey;quota;canbewiped;wipeingui
+# vbmeta and vbmeta_system are the two entries that are deliberately flashimg=1
+# while every other boot-chain partition above is flashimg=0. athens runs with
+# AVB enforced (vbmeta flags=0, SHA256_RSA4096) and the stock fstab only reaches
+# these partitions indirectly, through avb=vbmeta / avb=vbmeta_system on the
+# logical and boot entries - they were never named in /etc/recovery.fstab, so
+# the recovery could not offer them as image targets at all. Both exist in the
+# GPT as _a/_b pairs of 0.1 MiB. Keep the rest of the boot chain non-flashable:
+# OrangeFox's installer writes those from the ROM zip, and a stray manual write
+# to boot/_b is not recoverable on an anti_version=1 device.
+/vbmeta emmc /dev/block/by-name/vbmeta flags=display="VBMeta";slotselect;backup=1;flashimg=1
+/vbmeta_system emmc /dev/block/by-name/vbmeta_system flags=display="VBMeta System";slotselect;backup=1;flashimg=1
+
+# Firmware carriers. modem holds the per-device RF calibration and is the one
+# thing here that cannot be regenerated from the stock package, so it is the
+# only one worth a slot in a backup. bluetooth and dsp are plain firmware
+# payloads and are left backup=0 rather than spending 82 MiB per backup.
+/modem vfat /dev/block/by-name/modem flags=display="Modem";slotselect;backup=1;flashimg=0
+/bluetooth vfat /dev/block/by-name/bluetooth flags=display="Bluetooth";slotselect;backup=0;flashimg=0
+/dsp ext4 /dev/block/by-name/dsp flags=display="DSP";slotselect;backup=0;flashimg=0
+
+/data f2fs /dev/block/by-name/userdata flags=display="Data";fsflags=noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065,fsync_mode=nobarrier,inlinecrypt;fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0;metadata_encryption=aes-256-xts:wrappedkey_v0;keydirectory=/metadata/vold/metadata_encryption;wrappedkey;quota;canbewiped;wipeingui
 
 # Metadata holds the wrapped FBE key blobs (/metadata/vold/metadata_encryption).
 # Deliberately not exposed to the Wipe menu: wiping it alone destroys the
 # metadata key and makes /data permanently undecryptable.
-/metadata f2fs /dev/block/by-name/metadata flags=fsflags=noatime,nosuid,nodev,discard;backup=0;wipeingui=0;canbewiped=0
+/metadata f2fs /dev/block/by-name/metadata flags=display="Metadata";fsflags=noatime,nosuid,nodev,discard;backup=0;wipeingui=0;canbewiped=0
 
-/mnt/vendor/persist ext4 /dev/block/by-name/persist flags=fsflags=noatime,nosuid,nodev,barrier=1;backup=0;wipeingui=0;canbewiped=0
+/mnt/vendor/persist ext4 /dev/block/by-name/persist flags=display="Persist";fsflags=noatime,nosuid,nodev,barrier=1;backup=0;wipeingui=0;canbewiped=0
 
 # Match only USB-host block uevents; sda through sdf belong to internal UFS.
 /devices/platform/soc/a600000.ssusb/a600000.dwc3/* /usb_otg auto defaults removable,storage,display="USB OTG",wipeingui=0,canbewiped=0
