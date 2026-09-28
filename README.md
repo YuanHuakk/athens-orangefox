@@ -1,10 +1,6 @@
 # OrangeFox Recovery · REDMI K100 Pro
 
-**OrangeFox R12.0 Beta｜机型 athens（M511CD）｜Android 16**
-
-设备修订 **v1.2** 新增启动 KeyMint 前按当前 ROM 同步 Android 版本，并支持 ext4/EROFS APEX 只读挂载，针对 A17 的 metadata 解密失败和 tzdata APEX 挂载失败。已构建 v1.2 镜像；A16/A17 实机解密由用户手动刷入后验证。
-
-此前 **v1.1** 修复两项已在实机出现的问题：Recovery 缺少 Virtual A/B 运行时属性导致 OTA 按半个 super 空间检查；Format Data 未释放 userdata 加密映射导致 `In use by the system`。修复使用 AOSP VAB 产品配置和 libdm，同步保留快照合并检查；映射释放失败时停止格式化，不清除加密状态或继续擦除 metadata。
+**OrangeFox R12.0 Beta｜机型 athens（M511CD）｜Android 16/17**
 
 ---
 
@@ -13,7 +9,7 @@
 - **机型**：REDMI K100 Pro，型号 M511CD（POCO F9 Pro 为同机换标）
 - **代号**：athens
 - **平台**：骁龙 8 Elite Gen 5 / SM8850（canoe）
-- **系统**：Android 16（SDK 36）
+- **系统**：Android 16/17（SDK 36/37）
 - **内核**：6.12.69-android16
 - **分区**：A/B + 虚拟 A/B，保留独立 recovery 分区
 
