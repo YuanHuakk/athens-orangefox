@@ -1,8 +1,16 @@
 diff --git a/Android.mk b/Android.mk
-index 95a4b9c..d9e9a19 100644
+index 95a4b9c..b51c171 100644
 --- a/Android.mk
 +++ b/Android.mk
-@@ -607,13 +607,39 @@ TWRP_REQUIRED_MODULES += \
+@@ -79,6 +79,7 @@ else
+ endif
+ 
+ LOCAL_STATIC_LIBRARIES += libavb_user \
++                          libdm \
+                           libhealthhalutils \
+                           libhealthshim \
+                           libinit \
+@@ -607,13 +608,39 @@ TWRP_REQUIRED_MODULES += \
      libresetprop
  endif
  
@@ -43,7 +51,7 @@ index 95a4b9c..d9e9a19 100644
      servicemanager.rc
  
  ifneq ($(TW_INCLUDE_CRYPTO),)
-@@ -638,7 +664,11 @@ ifneq ($(wildcard external/unzip/Android.mk),)
+@@ -638,7 +665,11 @@ ifneq ($(wildcard external/unzip/Android.mk),)
  endif
  
  ifneq ($(TW_NO_EXFAT), true)
@@ -56,7 +64,7 @@ index 95a4b9c..d9e9a19 100644
      ifneq ($(TW_NO_EXFAT_FUSE), true)
          TWRP_REQUIRED_MODULES += exfat-fuse
      endif
-@@ -857,7 +887,6 @@ ifeq ($(BUILD_ID), GINGERBREAD)
+@@ -857,7 +888,6 @@ ifeq ($(BUILD_ID), GINGERBREAD)
  endif
  ifneq ($(TW_NO_EXFAT), true)
      include $(commands_TWRP_local_path)/exfat/mkfs/Android.mk \
@@ -752,10 +760,18 @@ index 67e0081..cb3e869 100644
      LOCAL_CFLAGS += -DOF_FLASHLIGHT_ENABLE='"$(OF_FLASHLIGHT_ENABLE)"'
  else
 diff --git a/partition.cpp b/partition.cpp
-index 1914cf4..2d40df9 100644
+index 1914cf4..68d8916 100644
 --- a/partition.cpp
 +++ b/partition.cpp
-@@ -1648,6 +1648,15 @@ bool TWPartition::Mount(bool Display_Error) {
+@@ -37,6 +37,7 @@
+ #include <zlib.h>
+ #include <sstream>
+ #include <android-base/properties.h>
++#include <libdm/dm.h>
+ #include <libsnapshot/snapshot.h>
+ 
+ #include "cutils/properties.h"
+@@ -1648,6 +1649,15 @@ bool TWPartition::Mount(bool Display_Error) {
  
  	Find_Actual_Block_Device();
  
@@ -771,7 +787,33 @@ index 1914cf4..2d40df9 100644
  	// Check the current file system before mounting
  	Check_FS_Type();
  	if (Current_File_System == "exfat" && TWFunc::Path_Exists("/system/bin/exfat-fuse")) {
-@@ -3342,6 +3351,7 @@ fail:
+@@ -2273,12 +2283,20 @@ bool TWPartition::Wipe_Encryption() {
+ 
+ #ifdef TW_INCLUDE_CRYPTO
+ 	if (!UnMount(true))
+-		return false;
+-	if (Is_Decrypted && !Decrypted_Block_Device.empty()) {
+-//		if (delete_crypto_blk_dev((char*)("userdata")) != 0) {
+-//			LOGERR("Error deleting crypto block device, continuing anyway.\n");
+-//		}
++		goto exit;
++#ifdef TW_INCLUDE_FBE_METADATA_DECRYPT
++	// MetadataCrypt creates the "userdata" mapping before user CE decryption.
++	// Unmounting /data does not release its claim on the raw block device.
++	// Check the mapping even if Is_Decrypted is false (e.g. a cancelled prompt).
++	if (Mount_Point == "/data" && !Key_Directory.empty()) {
++		auto& dm = android::dm::DeviceMapper::Instance();
++		if (!dm.DeleteDeviceIfExists("userdata")) {
++			LOGERR("Unable to release userdata encryption mapping; format aborted.\n");
++			goto exit;
++		}
++		LOGINFO("Released userdata encryption mapping before format.\n");
+ 	}
++#endif
+ #endif
+ 	Has_Data_Media = false;
+ 	Decrypted_Block_Device = "";
+@@ -3342,6 +3360,7 @@ fail:
  
  bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
  	int mount_point_index = 0; // we will need to create separate mount points for each partition found and we use this index to name each one
@@ -779,7 +821,7 @@ index 1914cf4..2d40df9 100644
  	string Path = TWFunc::Get_Path(Device);
  	string Dev = TWFunc::Get_Filename(Device);
  	size_t wildcard_index = Dev.find("*");
-@@ -3360,6 +3370,7 @@ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
+@@ -3360,6 +3379,7 @@ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
  
  		string item = Path + "/";
  		item.append(de->d_name);
@@ -787,7 +829,7 @@ index 1914cf4..2d40df9 100644
  		if (PartitionManager.Find_Partition_By_Block_Device(item))
  			continue;
  		TWPartition *part = new TWPartition;
-@@ -3386,7 +3397,9 @@ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
+@@ -3386,7 +3406,9 @@ bool TWPartition::Find_Wildcard_Block_Devices(const string& Device) {
  		PartitionManager.Add_Partition(part);
  	}
  	closedir(d);

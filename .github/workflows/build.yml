@@ -203,6 +203,7 @@ jobs:
             hardware/nxp/weaver:0004-hardware-nxp-weaver-recovery-sources.patch
             hardware/interfaces:0005-hardware-interfaces-recovery-available.patch
             system/vold:0006-system-vold-default-credential-decrypt.patch
+            bootable/recovery:0007-recovery-crypto-os-version-apex.patch
           )
           for entry in "${patches[@]}"; do
             project="${entry%%:*}"

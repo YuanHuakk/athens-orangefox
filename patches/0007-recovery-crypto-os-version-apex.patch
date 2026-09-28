@@ -1,0 +1,45 @@
+diff --git a/kernel_module_loader.cpp b/kernel_module_loader.cpp
+--- a/kernel_module_loader.cpp
++++ b/kernel_module_loader.cpp
+@@ -250,6 +250,7 @@
+ #ifdef TW_INCLUDE_CRYPTO
+ 	std::string vendor_patch;
+ 	std::string system_patch;
++	std::string system_release;
+ 	TWPartition* sysroot = PartitionManager.Find_Partition_By_Path("/system_root");
+ #endif
+ 
+@@ -349,6 +350,18 @@
+ 
+ 	if (!system_patch.empty()) {
+ 		ResetProp("ro.build.version.security_patch", system_patch);
++	}
++
++	// KeyMint reads this once at service startup. A later GUI/ROM-info
++	// override cannot change the OS version already supplied to the TEE.
++	// Use the installed ROM, so the same recovery can decrypt A16 and A17.
++	system_release = TWFunc::Partition_Property_Get("ro.build.version.release", PartitionManager, "/system_root", "build.prop");
++	if (!system_release.empty()) {
++		ResetProp("ro.build.version.release", system_release);
++		LOGINFO("Crypto OS version: %s (system patch: %s, vendor patch: %s)\n",
++			system_release.c_str(), system_patch.c_str(), vendor_patch.c_str());
++	} else {
++		LOGERR("Unable to read installed ROM version for KeyMint\n");
+ 	}
+ 
+ 	LOGINFO("Ending override security patch...\n");
+diff --git a/twrpApex.cpp b/twrpApex.cpp
+--- a/twrpApex.cpp
++++ b/twrpApex.cpp
+@@ -190,6 +190,11 @@
+ 	}
+ 
+ 	ret = mount(loop_device.c_str(), bind_mount.c_str(), "ext4", MS_RDONLY, nullptr);
++	// ROMs may package APEX payloads as EROFS (including A17 tzdata).
++	// Keep ext4 support for existing A16 payloads; both mounts are read-only.
++	if (ret != 0 && errno == EINVAL) {
++		ret = mount(loop_device.c_str(), bind_mount.c_str(), "erofs", MS_RDONLY, nullptr);
++	}
+ 	if (ret != 0) {
+ 		LOGERR("unable to mount loop device %s to %s. Reason: %s\n", loop_device.c_str(), bind_mount.c_str(), strerror(errno));
+ 		ioctl(loop_fd, LOOP_CLR_FD, 0);

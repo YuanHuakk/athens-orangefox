@@ -2,6 +2,10 @@
 
 **OrangeFox R12.0 Beta｜机型 athens（M511CD）｜Android 16**
 
+设备修订 **v1.2** 新增启动 KeyMint 前按当前 ROM 同步 Android 版本，并支持 ext4/EROFS APEX 只读挂载，针对 A17 的 metadata 解密失败和 tzdata APEX 挂载失败。已构建 v1.2 镜像；A16/A17 实机解密由用户手动刷入后验证。
+
+此前 **v1.1** 修复两项已在实机出现的问题：Recovery 缺少 Virtual A/B 运行时属性导致 OTA 按半个 super 空间检查；Format Data 未释放 userdata 加密映射导致 `In use by the system`。修复使用 AOSP VAB 产品配置和 libdm，同步保留快照合并检查；映射释放失败时停止格式化，不清除加密状态或继续擦除 metadata。
+
 ---
 
 ## 基本信息
@@ -98,6 +102,7 @@ git -C hardware/nxp/keymint apply "$R/patches/0003-hardware-nxp-keymint-recovery
 git -C hardware/nxp/weaver  apply "$R/patches/0004-hardware-nxp-weaver-recovery-sources.patch"
 git -C hardware/interfaces apply "$R/patches/0005-hardware-interfaces-recovery-available.patch"
 git -C system/vold         apply "$R/patches/0006-system-vold-default-credential-decrypt.patch"
+git -C bootable/recovery   apply "$R/patches/0007-recovery-crypto-os-version-apex.patch"
 
 # Ubuntu 24.04 起不再提供 python，但 AOSP 仍有脚本直接调 `python`。
 mkdir -p ~/bin && ln -sf /usr/bin/python3 ~/bin/python

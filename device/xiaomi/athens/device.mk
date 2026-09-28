@@ -7,8 +7,10 @@ PRODUCT_BUILD_VENDOR_BOOT_IMAGE := false
 PRODUCT_BUILD_SUPER_PARTITION := false
 PRODUCT_BUILD_SUPER_EMPTY_IMAGE := false
 PRODUCT_USE_DYNAMIC_PARTITIONS := true
-PRODUCT_VIRTUAL_AB_OTA := true
-PRODUCT_VIRTUAL_AB_COMPRESSION := true
+# Runtime properties are required by update_engine and the recovery snapshot
+# checks. Setting PRODUCT_VIRTUAL_AB_* alone does not emit these properties.
+$(call inherit-product, $(SRC_TARGET_DIR)/product/virtual_ab_ota/vabc_features.mk)
+PRODUCT_VIRTUAL_AB_COMPRESSION_METHOD := lz4
 
 AB_OTA_UPDATER := true
 AB_OTA_PARTITIONS += \

@@ -49,8 +49,8 @@ on property:keymaster_ver=* && property:twrp.crypto.ready=1
 on property:init.svc.vendor.qseecomd=running
     start vendor.minkdaemon
 
-# Process_Fstab imports the installed OS/vendor patch levels before publishing
-# keymaster_ver. Starting OneKeyMint earlier makes it reject the empty vendor
+# Process_Fstab imports the installed OS release and OS/vendor patch levels
+# before publishing keymaster_ver. Starting OneKeyMint earlier makes it reject the empty vendor
 # patch level, or initialize against the recovery build's unrelated OS version.
 on property:keymaster_ver=* && property:init.svc.vendor.qseecomd=running
     mkdir /vendor/firmware_mnt 0755 root root
