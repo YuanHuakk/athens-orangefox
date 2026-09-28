@@ -1,12 +1,2 @@
-# This repository exists to reproduce one specific, hardware-verified recovery
-# build, so git should store and check out file contents verbatim rather than
-# rewriting line endings on the way in or out.
-#
-# The case that matters is *.patch. Two of the OrangeFox theme files
-# (gui/theme/portrait_hdpi/themes/style.xml and themes/styles/Cream.xml) are
-# CRLF throughout, so any patch touching them carries CRLF context lines. With
-# core.autocrlf=input those get normalised to LF on commit.
-#
-# git apply tolerates that mismatch, but GNU patch -p1 does not, and the stored
-# patch would no longer be a faithful record of what was verified on the device.
+# Preserve line endings, including CRLF context in upstream theme patches.
 * -text

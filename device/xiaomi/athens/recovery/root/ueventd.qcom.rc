@@ -1,16 +1,5 @@
-# Recovery ueventd rules, installed as /vendor/etc/ueventd.rc.
-#
-# This file replaces the vendor's own, and ueventd runs it alone: the stock
-# /vendor/etc/ueventd.rc carries ~40 device rules the base Android one does not,
-# so anything the recovery-side hardware stack opens has to be listed here too.
-#
-# The drmrpc block below is what the TEE stack needs. Stock grants these nodes to
-# group drmrpc and starts the keymint HAL as system:drmrpc for exactly that
-# reason; without the rules the nodes keep their kernel default of root:root
-# 0600, and the keymint HAL fails to open the TEE with EACCES. qseecomd also
-# drops to system after startup, so its RPMB node needs the stock ownership.
-# drmrpc is AID 1026 and resolves from init's
-# built-in table, so it does not need a /vendor/etc/passwd entry.
+# Recovery device permissions, installed as /vendor/etc/ueventd.rc.
+# TEE nodes require system:drmrpc; qseecomd uses the system-owned RPMB node.
 firmware_directories /apex/com.xiaomi.wifi/etc/firmware/ /data/vendor/bdf/ /vendor/firmware_mnt/image/ /vendor/modem_firmware/image/ /vendor/soccp_firmware/image/ /vendor/dcp_firmware/image/ /odm/firmware /vendor/firmware /lib/firmware
 
 /dev/dri/* 0660 root graphics

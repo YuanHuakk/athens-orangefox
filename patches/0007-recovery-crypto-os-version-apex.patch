@@ -9,15 +9,13 @@ diff --git a/kernel_module_loader.cpp b/kernel_module_loader.cpp
  	TWPartition* sysroot = PartitionManager.Find_Partition_By_Path("/system_root");
  #endif
  
-@@ -349,6 +350,18 @@
+@@ -349,6 +350,16 @@
  
  	if (!system_patch.empty()) {
  		ResetProp("ro.build.version.security_patch", system_patch);
 +	}
 +
-+	// KeyMint reads this once at service startup. A later GUI/ROM-info
-+	// override cannot change the OS version already supplied to the TEE.
-+	// Use the installed ROM, so the same recovery can decrypt A16 and A17.
++	// KeyMint caches the OS version at startup; import the installed ROM value first.
 +	system_release = TWFunc::Partition_Property_Get("ro.build.version.release", PartitionManager, "/system_root", "build.prop");
 +	if (!system_release.empty()) {
 +		ResetProp("ro.build.version.release", system_release);
@@ -31,12 +29,11 @@ diff --git a/kernel_module_loader.cpp b/kernel_module_loader.cpp
 diff --git a/twrpApex.cpp b/twrpApex.cpp
 --- a/twrpApex.cpp
 +++ b/twrpApex.cpp
-@@ -190,6 +190,11 @@
+@@ -190,6 +190,10 @@
  	}
  
  	ret = mount(loop_device.c_str(), bind_mount.c_str(), "ext4", MS_RDONLY, nullptr);
-+	// ROMs may package APEX payloads as EROFS (including A17 tzdata).
-+	// Keep ext4 support for existing A16 payloads; both mounts are read-only.
++	// Support EROFS payloads alongside ext4; both mounts remain read-only.
 +	if (ret != 0 && errno == EINVAL) {
 +		ret = mount(loop_device.c_str(), bind_mount.c_str(), "erofs", MS_RDONLY, nullptr);
 +	}

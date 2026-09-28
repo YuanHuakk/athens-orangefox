@@ -10,36 +10,11 @@ index 95a4b9c..b51c171 100644
                            libhealthhalutils \
                            libhealthshim \
                            libinit \
-@@ -607,13 +608,39 @@ TWRP_REQUIRED_MODULES += \
+@@ -607,13 +608,14 @@ TWRP_REQUIRED_MODULES += \
      libresetprop
  endif
  
-+# servicemanager.recovery, not servicemanager: the two are separate Soong modules
-+# with separate binaries, and only the .recovery one is built with
-+# -D__ANDROID_RECOVERY__ (build/soong/cc/compiler.go:496, driven by `recovery: true`
-+# in frameworks/native/cmds/servicemanager/Android.bp). That macro is what selects
-+# the VINTF manifest servicemanager validates against:
-+#
-+#   ServiceManager.cpp:81  #ifdef __ANDROID_RECOVERY__
-+#                            VintfObjectRecovery::getRecoveryHalManifest()  -> /system/etc/vintf/
-+#                          #else
-+#                            VintfObject::getDeviceHalManifest()            -> /vendor/etc/vintf/
-+#
-+# This tree installs its recovery VINTF fragments under
-+# TARGET_RECOVERY_ROOT_OUT/system/etc/vintf/manifest (see etc/Android.mk, which puts
-+# android.system.keystore2-service.xml there), so the plain variant looks in the
-+# wrong place: /vendor/etc/vintf/manifest.xml does not exist, and
-+# VintfObject::fetchDeviceHalManifest only reads the fragment directory when that
-+# main manifest is present (VintfObject.cpp:323). The device manifest ends up
-+# empty, every android.hardware.* AIDL HAL started from init.recovery.qcom.rc is
-+# rejected with "Could not find ... in the VINTF manifest", and each one exits 1
-+# for init to respawn. keystore2 then fails to construct its mandatory TEE security
-+# level (service.rs:69) and panics, so vold blocks forever in
-+# AServiceManager_waitForService (Keystore.cpp:106) and recovery never leaves the
-+# splash screen.
-+#
-+# stem: "servicemanager" in Android.bp keeps the installed path identical, and the
-+# rc below is already written for the recovery variant (uid 0, u:r:recovery:s0).
++# Use the recovery variant to load VINTF manifests from the ramdisk.
  TWRP_REQUIRED_MODULES += \
      hwservicemanager \
      hwservicemanager.rc \
@@ -51,20 +26,17 @@ index 95a4b9c..b51c171 100644
      servicemanager.rc
  
  ifneq ($(TW_INCLUDE_CRYPTO),)
-@@ -638,7 +665,11 @@ ifneq ($(wildcard external/unzip/Android.mk),)
+@@ -638,7 +640,8 @@ ifneq ($(wildcard external/unzip/Android.mk),)
  endif
  
  ifneq ($(TW_NO_EXFAT), true)
 -    TWRP_REQUIRED_MODULES += mkexfatfs fsckexfat
-+    # fsckexfat is not built: its stem is fsck.exfat, which would collide with
-+    # exfatprogs' fsck.exfat that vendor/twrp/config/packages.mk installs into
-+    # the recovery root. exfatprogs is the maintained implementation and is what
-+    # partition.cpp invokes at /system/bin/fsck.exfat.
++    # Use exfatprogs' fsck.exfat; fsckexfat installs to the same path.
 +    TWRP_REQUIRED_MODULES += mkexfatfs
      ifneq ($(TW_NO_EXFAT_FUSE), true)
          TWRP_REQUIRED_MODULES += exfat-fuse
      endif
-@@ -857,7 +888,6 @@ ifeq ($(BUILD_ID), GINGERBREAD)
+@@ -857,7 +860,6 @@ ifeq ($(BUILD_ID), GINGERBREAD)
  endif
  ifneq ($(TW_NO_EXFAT), true)
      include $(commands_TWRP_local_path)/exfat/mkfs/Android.mk \
@@ -160,18 +132,12 @@ index a3eb4fd..648a364 100644
  	int ret = ev_get(&ev, timeout_ms);
  
  	if (ret < 0)
-@@ -448,6 +448,45 @@ void InputHandler::process_EV_ABS(input_event& ev)
+@@ -448,6 +448,39 @@ void InputHandler::process_EV_ABS(input_event& ev)
  	}
  }
  
-+// Power + volume are the hardware shortcuts: power+vol-up drives the torch,
-+// power+vol-down takes a screenshot. Resolve them on the key press instead of
-+// leaving it to processHoldAndRepeat(), which only fires after a 200ms hold: a
-+// tapped KEY_POWER is released long before that, and its release path calls
-+// blankTimer.toggleBlank(), so a normal tap blanked the panel before the combo
-+// could ever match. Both orders are recognised, since the keys are pressed
-+// together and either may arrive first. Returns true when a shortcut consumed
-+// the press.
++// Handle power+volume shortcuts on key-down, before the hold timer.
++// Accept either key order; return true when the shortcut consumes the press.
 +static bool handlePowerVolumeShortcut(int code, HardwareKeyboard *kb)
 +{
 +	bool torch = false;
@@ -206,14 +172,11 @@ index a3eb4fd..648a364 100644
  void InputHandler::process_EV_KEY(input_event& ev)
  {
  	HardwareKeyboard *kb = PageManager::GetHardwareKeyboard();
-@@ -493,6 +532,17 @@ void InputHandler::process_EV_KEY(input_event& ev)
+@@ -493,6 +526,14 @@ void InputHandler::process_EV_KEY(input_event& ev)
  			return;
  		}
  #endif
-+		// Shortcuts are consumed here, before the state machine below arms its
-+		// 200ms hold. mime is cleared first because KeyDown() notifies through
-+		// Page::NotifyKey, which remaps the key to key+200 while mime > 500 - a
-+		// stale value from an earlier hold would mangle this press.
++		// Clear hold state before KeyDown, which remaps keys when mime > 500.
 +		if (handlePowerVolumeShortcut(ev.code, kb)) {
 +			mime = 0;
 +			kb->KeyDown(ev.code);
@@ -224,22 +187,18 @@ index a3eb4fd..648a364 100644
  		if (kb->KeyDown(ev.code) >= 0) {
  			// Key repeat is enabled for this key
  			key_status = KS_KEY_PRESSED;
-@@ -532,8 +582,12 @@ void InputHandler::process_EV_KEY(input_event& ev)
+@@ -532,8 +573,8 @@ void InputHandler::process_EV_KEY(input_event& ev)
  				}
  			}
  		}
 -		if (mime <= 500)
 -			kb->KeyUp(ev.code);
-+		// Always release the key. Skipping KeyUp() on a long hold left it in
-+		// mPressedKeys forever, and a stale entry makes a later
-+		// AreKeysPressed()/IsKeyDown() match a key the user is not holding any
-+		// more - which also arms the power+volume shortcuts on a bare press.
-+		// Page handlers ignore down==false, so the extra notify is inert.
++		// Release held keys as well, so later shortcuts cannot match stale state.
 +		kb->KeyUp(ev.code);
  		key_status = KS_NONE;
  		touch_status = TS_NONE;
  #ifdef TW_USE_KEY_CODE_TOUCH_SYNC
-@@ -722,11 +776,10 @@ static void loopTimer(int input_timeout_ms)
+@@ -722,11 +763,10 @@ static void loopTimer(int input_timeout_ms)
  
  		timespec diff = TWFunc::timespec_diff(lastCall, curTime);
  
@@ -254,7 +213,7 @@ index a3eb4fd..648a364 100644
  		{
  			// int32_t input_time = TWFunc::timespec_diff_ms(lastCall, curTime);
  			// LOGINFO("loopTimer(): %u ms, count: %u\n", input_time, count);
-@@ -736,10 +789,9 @@ static void loopTimer(int input_timeout_ms)
+@@ -736,10 +776,9 @@ static void loopTimer(int input_timeout_ms)
  			return;
  		}
  
@@ -1111,14 +1070,13 @@ index 557283b..a0bf115 100755
  	return true;
  }
  
-@@ -152,39 +157,46 @@ bool twrpApex::loadApexImage(std::string fileToMount, size_t loop_device_number)
+@@ -152,39 +157,45 @@ bool twrpApex::loadApexImage(std::string fileToMount, size_t loop_device_number)
  
  	memset(&info, 0, sizeof(struct loop_info64));
  	strlcpy((char*)info.lo_crypt_name, "twrpApex", LO_NAME_SIZE);
 -	off_t apex_size = lseek(fd, 0, SEEK_END);
 -	info.lo_sizelimit = apex_size;
-+	// A zero size limit maps the entire payload. fd has already been closed;
-+	// seeking it returned -1 and turned the size limit into UINT64_MAX.
++	// A zero size limit maps the entire payload.
  	if (ioctl(loop_fd, LOOP_SET_STATUS64, &info)) {
  		LOGERR("failed to mount loop: %s: %s\n", fileToMount.c_str(), strerror(errno));
 +		ioctl(loop_fd, LOOP_CLR_FD, 0);

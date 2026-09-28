@@ -1,44 +1,19 @@
-# USB in recovery is split over two files.
-#
-# TWRP's own /system/etc/init/hw/init.rc imports this one (line 4) and then
-# builds the base gadget itself: configfs on /config, g1, the ffs.adb and
-# ffs.fastboot functions, their /dev/usb-ffs mounts, and the adb / sideload /
-# fastboot property triggers. The ids it writes come from ro.recovery.usb.vid,
-# ro.recovery.usb.adb.pid and ro.recovery.usb.fastboot.pid, supplied by
-# build/make/target/product/base_vendor.mk as 18D1 / D001 / 4EE0. Repeating any
-# of that here - as this file used to - only buys a second round of EEXIST
-# mkdirs and EBUSY mounts on every boot, because init.rc imports us ahead of
-# its own on fs, so our copy runs first and its copy then fails.
-#
-# What init.rc has no support for is MTP, and that is all this file carries.
-#
-# TWRP's MTP is FunctionFS, not the kernel's mtp.gs0 function. The server opens
-# /dev/usb-ffs/mtp/ep0, writes its own descriptors (see mtp/ffs/MtpDescriptors.cpp)
-# and only then sets sys.usb.ffs.mtp.ready. So the gadget needs a matching
-# ffs.mtp function and functionfs mount, and the two-function configuration can
-# only be assembled once that flag and adbd's own sys.usb.ffs.ready are both up.
-#
-# The trigger is post-fs, not fs: init.rc creates g1 in its on fs, and late-init
-# queues post-fs strictly after fs, so g1 exists by the time this runs.
+# Base init configures ADB and Fastboot. Add MTP after it creates the gadget.
+# Bind MTP+ADB only after both FunctionFS endpoints are ready.
 on post-fs && property:sys.usb.configfs=1
     mkdir /config/usb_gadget/g1/functions/ffs.mtp 0770 shell shell
     mkdir /dev/usb-ffs/mtp 0770 shell shell
     mount functionfs mtp /dev/usb-ffs/mtp rmode=0770,fmode=0660,uid=2000,gid=2000
 
-# TWRP's Enable_MTP() clears sys.usb.config before switching to mtp,adb, and
-# init.rc's own none handler removes f1 but not f2. Without this the f2 symlink
-# below fails the second time MTP is turned on.
+# Remove the second function when disabling MTP; base init removes f1.
 on property:sys.usb.config=none && property:sys.usb.configfs=1
     rm /config/usb_gadget/g1/configs/b.1/f2
 
-# Clearing the config stops adbd, so it has to be brought back before the
-# mtp+adb configuration can be assembled.
+# Restart adbd after clearing the USB configuration.
 on property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
     start adbd
 
-# 4EE2 is the MTP+ADB product id, the counterpart to the D001 adb and 4EE0
-# fastboot ids the base gadget uses. mtp goes on f1 and adb on f2, matching the
-# order AOSP's init.usb.configfs.rc uses for its own mtp,adb configuration.
+# MTP+ADB configuration (USB product ID 4EE2).
 on property:sys.usb.ffs.ready=1 && property:sys.usb.ffs.mtp.ready=1 && property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
     write /config/usb_gadget/g1/idProduct 0x4EE2
     write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration mtp_adb

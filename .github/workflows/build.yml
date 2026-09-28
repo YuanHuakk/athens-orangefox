@@ -1,6 +1,5 @@
 name: Build OrangeFox
 
-# Manual runs are the normal path; pushing a v* tag additionally cuts a release.
 on:
   workflow_dispatch:
     inputs:
@@ -33,47 +32,21 @@ permissions:
   contents: write
 
 env:
-  # The pin lives here and nowhere else. It cannot live in the input's
-  # `default:` above: `inputs` is empty on the push and pull_request triggers,
-  # so an `inputs.x || 'fallback'` expression falls through to the fallback
-  # there. A
-  # literal 'twrp-16.0' fallback would send tag builds and PR builds down the
-  # floating branch while manual runs stayed pinned - the exact drift this repo
-  # pins away, on the trigger that cuts releases. One env var, all three
-  # triggers, no second copy to forget to update.
+  # Shared default for manual, tag and pull-request builds.
   BASE_MANIFEST_REVISION: 6f074703a0ab31f22518b1a94331b358190237ba
 
 jobs:
   build:
     runs-on: ubuntu-24.04
-    # Measured on the first run: this image reports 145 GB on /, 130 GB free
-    # after the cleanup below, and the build needs about 90 GB of it (18 GB
-    # .repo + 58 GB checkout + 14 GB out). So it fits with room to spare. Cap
-    # the job anyway so a wedged sync cannot burn the 6-hour limit.
     timeout-minutes: 350
 
     steps:
-      # Not needed to make the build fit - see the disk note on the job. Kept
-      # because it is what the recovery-building community runs and it buys
-      # headroom, but it is the single most expensive step before the sync at
-      # about 4m30s. Removing it is a one-line change if that stops being worth
-      # it.
-      # Pinned to a commit, not @main: this repo pins every revision it can, and
-      # a third-party action on a branch is the one remaining thing that could
-      # change under us between two builds of the same commit.
       - name: Free disk space
         uses: rokibhasansagar/slimhub_actions@c2a6e4317d3de2b623ac7395b05e9d2149e8289b # main
 
       - name: Check out this repository
         uses: actions/checkout@v4
 
-      # Deliberately no gcc-multilib / lib32readline-dev / lib32z1-dev: those
-      # live in the i386 archive and apt fails outright on them unless
-      # `dpkg --add-architecture i386` has been run. Android 16 builds are
-      # 64-bit-host only and this product inherits core_64_bit_only.mk, so they
-      # are not needed. Keeping the list to packages that are unambiguously
-      # present also means a bad name fails here, in seconds, rather than after
-      # an hour of syncing.
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -83,8 +56,6 @@ jobs:
             openjdk-17-jdk-headless pngcrush python3 rsync schedtool \
             squashfs-tools unzip xsltproc zip zlib1g-dev zstd
 
-      # Ubuntu 24.04 no longer ships Python 2, but parts of the AOSP build
-      # still invoke a bare `python`.
       - name: Provide python shim
         run: |
           sudo ln -sf /usr/bin/python3 /usr/local/bin/python
@@ -96,8 +67,6 @@ jobs:
           chmod a+rx "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      # The runner has 16 GB of RAM and soong links several large binaries at
-      # once; without swap an otherwise fine build dies in the linker.
       - name: Set up swap
         uses: pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761 # master
         with:
@@ -107,40 +76,17 @@ jobs:
         run: df -h / /mnt 2>/dev/null || df -h /
 
       - name: Initialize the source tree
+        env:
+          MANIFEST_REVISION: ${{ inputs.manifest_revision }}
         run: |
           mkdir -p "$GITHUB_WORKSPACE/tree"
           cd "$GITHUB_WORKSPACE/tree"
           git config --global user.name  "GitHub Actions"
           git config --global user.email "actions@github.com"
           git config --global color.ui false
-          # The OrangeFox Android 16 entry point is
-          #   repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_16.0
-          # but that remote is not anonymously reachable. The twrp-16 minimal
-          # manifest is public, and manifest/orangefox.xml swaps every component
-          # OrangeFox forks back to its public per-component fox_16.0 branch.
-          #
-          # The base manifest pins most projects to refs/tags/android-16.0.0_r1,
-          # so the only thing that floated was the manifest branch itself. That
-          # is pinned now too, to env.BASE_MANIFEST_REVISION (the tip of
-          # twrp-16.0 as of 2026-09-26), and manifest/orangefox.xml pins the 53
-          # projects it declares to SHAs. Pass a branch name here to
-          # deliberately move to newer sources.
-          #
-          # If it is a branch it has to be twrp-16.0. This remote has exactly two
-          # heads, lvgl and twrp-16.0, and no branch called "default" - but repo
-          # names its *local* manifest branch "default" whenever -b is omitted,
-          # so "default" is what a working checkout reports and looks like the
-          # right thing to pass back in. It is not: -b default dies here with
-          # "couldn't find remote ref refs/heads/default".
-          # BASE_MANIFEST_REVISION comes in as a shell variable: workflow-level
-          # env is exported to every step. The input is read through an
-          # expression instead, because the `inputs` context is guaranteed in
-          # `run` while `env` is not, so the empty case is resolved by the
-          # shell's own ${VAR:-default} rather than by an expression.
-          rev="${{ inputs.manifest_revision }}"
           repo init --depth=1 \
             -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git \
-            -b "${rev:-$BASE_MANIFEST_REVISION}"
+            -b "${MANIFEST_REVISION:-$BASE_MANIFEST_REVISION}"
 
       - name: Apply the OrangeFox overlay manifest
         run: |
@@ -151,51 +97,27 @@ jobs:
       - name: Sync sources
         run: |
           cd "$GITHUB_WORKSPACE/tree"
-          # -c/--current-branch fetches only the revision the manifest names,
-          # which is a large saving on a tree this size. Nothing here needs the
-          # other branches.
-          #
-          # android.googlesource.com rate-limits by IP and answers HTTP 429 when
-          # too many fetches run at once; that is what killed the first local
-          # run at -j16 and cost it the whole sync. The runner only has 4 CPUs
-          # so -j4 has not triggered it, but repo sync resumes, so retrying is
-          # always cheaper than restarting the job.
-          synced=0
           for attempt in 1 2 3 4; do
             if repo sync -c -j"$(nproc --all)" --force-sync --no-clone-bundle --no-tags; then
-              synced=1
               break
             fi
-            echo "::warning::sync attempt $attempt failed, retrying"
+            if [ "$attempt" -eq 4 ]; then
+              echo "::error::repo sync failed after $attempt attempts"
+              exit 1
+            fi
+            echo "::warning::repo sync attempt $attempt failed; retrying in 60 seconds"
             sleep 60
           done
-          [ "$synced" = 1 ] || { echo "::error::sync failed after 4 attempts"; exit 1; }
-          # The tree is close to the size of the runner's filesystem, so record
-          # what it actually cost. If a later step dies on ENOSPC this is the
-          # number to look at.
           du -sh "$GITHUB_WORKSPACE/tree" "$GITHUB_WORKSPACE/tree/.repo"
           df -h /
 
       - name: Install the device tree
         run: |
-          # -a so the six vendor binaries under recovery/root keep their
-          # executable bit; without it init cannot start qseecomd and
-          # decryption fails at runtime rather than at build time.
           cp -a "$GITHUB_WORKSPACE/device/xiaomi/athens" \
                 "$GITHUB_WORKSPACE/tree/device/xiaomi/athens"
 
       - name: Apply patches to upstream projects
         run: |
-          # Each patch is a plain `git diff` taken from inside its own project,
-          # so it carries project-relative a/ b/ paths and has to be applied
-          # from that project's directory. One patch per project: a single file
-          # cannot span two git repositories.
-          #
-          # These cover every project the device tree depends on. Missing one
-          # is not always loud - the two nxp filegroups below are referenced by
-          # name from device/xiaomi/athens/Android.bp and break soong, but the
-          # interfaces and vold patches would instead ship a recovery that
-          # builds fine and cannot decrypt /data.
           patches=(
             bootable/recovery:0001-recovery-athens.patch
             frameworks/native:0002-frameworks-native-servicemanager-rc.patch
@@ -209,15 +131,12 @@ jobs:
             project="${entry%%:*}"
             name="${entry##*:}"
             patch="$GITHUB_WORKSPACE/patches/$name"
-            # An empty patch applies cleanly and changes nothing, which is the
-            # one way this step can pass while leaving the tree unpatched.
             if [ ! -s "$patch" ]; then
               echo "::error::$name is empty"
               exit 1
             fi
-            cd "$GITHUB_WORKSPACE/tree/$project"
-            git apply "$patch"
-            git apply --reverse --check "$patch"
+            git -C "$GITHUB_WORKSPACE/tree/$project" apply "$patch"
+            git -C "$GITHUB_WORKSPACE/tree/$project" apply --reverse --check "$patch"
             echo "applied $name to $project"
           done
 
@@ -227,32 +146,23 @@ jobs:
           TARGETS: ${{ inputs.targets || 'adbd recoveryimage' }}
         run: |
           cd "$GITHUB_WORKSPACE/tree"
-          # The exports must come before envsetup.sh is sourced. envsetup.sh
-          # sources the device tree's vendorsetup.sh, which keys off
-          # FOX_BUILD_DEVICE to export FOX_AB_DEVICE, FOX_VIRTUAL_AB_DEVICE and
-          # the bundled shell/binary flags. Export them afterwards and the
-          # recovery silently builds as a non-A/B device.
+          # Device variables must be set before envsetup loads vendorsetup.sh.
           export LC_ALL=C
           export FOX_BUILD_DEVICE=athens
           # shellcheck disable=SC1091
           . build/envsetup.sh
           lunch twrp_athens-bp2a-eng
-          # adbd is a separate target here, not a side effect of recoveryimage.
-          # shellcheck disable=SC2086
-          mka $TARGETS
+          read -r -a build_targets <<< "$TARGETS"
+          mka "${build_targets[@]}"
 
       - name: Collect artifacts
         run: |
           out="$GITHUB_WORKSPACE/out"
           src="$GITHUB_WORKSPACE/tree/out/target/product/athens"
           mkdir -p "$out"
-          # recovery.img is byte-identical to OrangeFox-*.img, so it is not
-          # collected separately.
           find "$src" -maxdepth 1 -name 'OrangeFox-*' -type f \
                -exec cp -v {} "$out/" \;
-          # TWRP writes these sidecars with the absolute build-machine path,
-          # which makes `md5sum -c` fail for anyone who downloads them.
-          # Re-emit with bare filenames so they are actually usable.
+          # Store relative paths in checksum files.
           cd "$out"
           for f in OrangeFox-*.md5; do
             [ -e "$f" ] || continue
@@ -263,7 +173,7 @@ jobs:
       - name: Report checksums
         run: |
           cd "$GITHUB_WORKSPACE/out"
-          sha256sum ./* > SHA256SUMS.txt
+          sha256sum OrangeFox-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Upload artifacts
