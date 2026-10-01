@@ -126,6 +126,7 @@ jobs:
             hardware/interfaces:0005-hardware-interfaces-recovery-available.patch
             system/vold:0006-system-vold-default-credential-decrypt.patch
             bootable/recovery:0007-recovery-crypto-os-version-apex.patch
+            bootable/recovery:0008-recovery-fbe-media-root.patch
           )
           for entry in "${patches[@]}"; do
             project="${entry%%:*}"

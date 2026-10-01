@@ -8,7 +8,7 @@
 | 代号 | `athens` |
 | 平台 | Qualcomm SM8850（`canoe`） |
 | Recovery | OrangeFox R12.0 Beta |
-| 设备树版本 | v1.2 |
+| 设备树版本 | v1.3 |
 | 适配目标 | Android 16 / 17（SDK 36 / 37） |
 | 构建基座 | Android 16（SDK 36） |
 | 内核 | 6.12.69-android16 |
@@ -25,7 +25,7 @@
 
 - FBE 与 metadata 加密解密
 - ADB、ADB Sideload、Fastbootd
-- MTP 文件传输，默认关闭，可在「挂载」页面开启
+- MTP 文件传输，默认关闭，可在「挂载」页面开启；格式化 Data 后可直接传文件，Recovery 中从 `/sdcard` 访问
 - 分区镜像备份、恢复及 ZIP 安装
 - 截图：音量下 + 电源，保存至 `/sdcard/Fox/screenshots/`
 - 手电筒：音量上 + 电源
@@ -87,6 +87,7 @@ git -C hardware/nxp/weaver apply "$RECOVERY_REPO/patches/0004-hardware-nxp-weave
 git -C hardware/interfaces apply "$RECOVERY_REPO/patches/0005-hardware-interfaces-recovery-available.patch"
 git -C system/vold apply "$RECOVERY_REPO/patches/0006-system-vold-default-credential-decrypt.patch"
 git -C bootable/recovery apply "$RECOVERY_REPO/patches/0007-recovery-crypto-os-version-apex.patch"
+git -C bootable/recovery apply "$RECOVERY_REPO/patches/0008-recovery-fbe-media-root.patch"
 
 mkdir -p "$HOME/bin"
 ln -sf /usr/bin/python3 "$HOME/bin/python"

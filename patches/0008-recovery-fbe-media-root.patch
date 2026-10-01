@@ -1,0 +1,63 @@
+diff --git a/partition.cpp b/partition.cpp
+--- a/partition.cpp
++++ b/partition.cpp
+@@ -68,6 +68,8 @@
+ 	#include "gpt/gpt.h"
+ #endif
+ }
++#include <private/android_filesystem_config.h>
++#include <selinux/android.h>
+ #include <selinux/selinux.h>
+ #include <selinux/label.h>
+ #ifdef HAVE_CAPABILITIES
+@@ -2315,11 +2317,7 @@
+ #ifndef TW_OEM_BUILD
+ 		gui_msg("format_data_msg=You may need to reboot recovery to be able to use /data again.");
+ #endif
+-		if (Is_FBE) {
+-		    if (DataManager::GetIntValue(FOX_DISABLE_FORCED_ENCRYPTION) != 1) {
+-			gui_msg(Msg(msg::kWarning, "data_media_fbe_msg=OrangeFox will not recreate /data/media on an FBE device. Please reboot into your rom to create /data/media."));
+-		    }
+-		} else {
++		if (!Is_FBE) {
+ 			if (Has_Data_Media && !Symlink_Mount_Point.empty()) {
+ 				if (Mount(false))
+ 					PartitionManager.Add_MTP_Storage(MTP_Storage_ID);
+@@ -2331,6 +2329,11 @@
+ 		if (ret) {
+ 			ret = base_partition->PostWipeEncryption();
+ 			TWFunc::PostWipeEncryption();
++		}
++		if (ret && Is_FBE && Has_Data_Media && !Symlink_Mount_Point.empty()) {
++			Recreate_Media_Folder();
++			if (TWFunc::Path_Exists(Storage_Path))
++				PartitionManager.Add_MTP_Storage(MTP_Storage_ID);
+ 		}
+ 		goto exit;
+ 	} else {
+@@ -3464,7 +3467,24 @@
+ 	string Media_Path = Mount_Point + "/media";
+ 
+ 	if (Is_FBE) {
+-		LOGINFO("Not recreating media folder on FBE\n");
++		if (!Mount(true) || TWFunc::Path_Exists(Media_Path))
++			return;
++
++		// Android must create media/0 with its CE policy on first boot.
++		if (mkdir(Media_Path.c_str(), 0770) != 0 ||
++			chown(Media_Path.c_str(), AID_MEDIA_RW, AID_MEDIA_RW) != 0 ||
++			chmod(Media_Path.c_str(), 0770) != 0 ||
++			selinux_android_restorecon(Media_Path.c_str(), 0) != 0) {
++			LOGERR("Unable to initialize %s: %s\n", Media_Path.c_str(), strerror(errno));
++			return;
++		}
++		Storage_Path = Media_Path;
++		Symlink_Path = Media_Path;
++		DataManager::SetValue(TW_INTERNAL_PATH, Media_Path);
++		DataManager::SetValue("tw_storage_path", Media_Path);
++		if (!Symlink_Mount_Point.empty() && !Bind_Mount(true))
++			LOGERR("Unable to bind %s to %s\n", Media_Path.c_str(), Symlink_Mount_Point.c_str());
++		LOGINFO("Created FBE media root: %s\n", Media_Path.c_str());
+ 		return;
+ 	}
+ 	if (!Mount(true)) {
