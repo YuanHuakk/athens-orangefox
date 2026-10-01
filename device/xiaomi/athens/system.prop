@@ -1,2 +1,3 @@
 ro.hardware=qcom
 ro.twrp.athens.bringup=1
+sys.usb.ffs.aio_compat=true

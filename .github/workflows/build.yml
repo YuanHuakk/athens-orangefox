@@ -127,6 +127,8 @@ jobs:
             system/vold:0006-system-vold-default-credential-decrypt.patch
             bootable/recovery:0007-recovery-crypto-os-version-apex.patch
             bootable/recovery:0008-recovery-fbe-media-root.patch
+            bootable/recovery:0009-recovery-mtp-large-files.patch
+            bootable/recovery:0010-recovery-mtp-reconnect.patch
           )
           for entry in "${patches[@]}"; do
             project="${entry%%:*}"

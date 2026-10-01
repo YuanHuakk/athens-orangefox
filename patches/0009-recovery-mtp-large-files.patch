@@ -1,0 +1,59 @@
+diff --git a/mtp/ffs/MtpFfsCompatHandle.cpp b/mtp/ffs/MtpFfsCompatHandle.cpp
+--- a/mtp/ffs/MtpFfsCompatHandle.cpp
++++ b/mtp/ffs/MtpFfsCompatHandle.cpp
+@@ -174,6 +174,7 @@
+ 	size_t length;
+ 	bool read = false;
+ 	bool write = false;
++	bool short_packet = false;
+ 
+ 	posix_fadvise(mfr.fd, 0, 0, POSIX_FADV_SEQUENTIAL | POSIX_FADV_NOREUSE);
+ 
+@@ -218,12 +219,13 @@
+ 				// For larger files, receive until a short packet is received.
+ 				if (static_cast<size_t>(ret) < length) {
+ 					file_length = 0;
++					short_packet = true;
+ 				}
+ 			} else {
+ 				file_length -= ret;
+ 			}
+ 			// Enqueue a new write request
+-			aio_prepare(&aio, data, length, offset);
++			aio_prepare(&aio, data, ret, offset);
+ 			aio_write(&aio);
+ 
+ 			offset += ret;
+@@ -233,8 +235,8 @@
+ 			read = false;
+ 		}
+ 	}
+-	// Receive an empty packet if size is a multiple of the endpoint size.
+-	if (ret % packet_size == 0 || zero_packet) {
++	// A short read already consumed the end of an unknown-length transfer.
++	if ((ret % packet_size == 0 && !short_packet) || zero_packet) {
+ 		if (TEMP_FAILURE_RETRY(::read(mBulkOut, data, packet_size)) != 0) {
+ 			return -1;
+ 		}
+
+diff --git a/partitionmanager.cpp b/partitionmanager.cpp
+--- a/partitionmanager.cpp
++++ b/partitionmanager.cpp
+@@ -3112,5 +3112,7 @@ bool TWPartitionManager::Enable_MTP(void) {
+ 		LOGINFO("MTP already enabled\n");
+ 		return true;
+ 	}
++	// Select the buffered FunctionFS path before the child MTP server starts.
++	property_set("sys.usb.ffs.aio_compat", "1");
+ 
+ 	int mtppipe[2];
+
+diff --git a/prebuilt/Android.mk b/prebuilt/Android.mk
+--- a/prebuilt/Android.mk
++++ b/prebuilt/Android.mk
+@@ -450,4 +450,5 @@ LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/
+ # Required modules impose build order only; refresh the ramdisk copy when the
+ # graphics/input library changes during an incremental recovery build.
+ LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_SHARED_LIBRARIES)/libminuitwrp.so
++LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_SHARED_LIBRARIES)/libtwrpmtp-ffs.so
+ ifneq ($(TARGET_ARCH), arm64)

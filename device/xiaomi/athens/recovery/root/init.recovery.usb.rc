@@ -13,8 +13,24 @@ on property:sys.usb.config=none && property:sys.usb.configfs=1
 on property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
     start adbd
 
+on property:init.svc.adbd=stopped
+    setprop sys.usb.ffs.ready 0
+
+# Closing either FunctionFS control endpoint invalidates the composite gadget.
+on property:sys.usb.ffs.ready=0 && property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/UDC none
+    rm /config/usb_gadget/g1/configs/b.1/f1
+    rm /config/usb_gadget/g1/configs/b.1/f2
+    setprop sys.usb.state none
+
+on property:sys.usb.ffs.mtp.ready=0 && property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/UDC none
+    rm /config/usb_gadget/g1/configs/b.1/f1
+    rm /config/usb_gadget/g1/configs/b.1/f2
+    setprop sys.usb.state none
+
 # MTP+ADB configuration (USB product ID 4EE2).
-on property:sys.usb.ffs.ready=1 && property:sys.usb.ffs.mtp.ready=1 && property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
+on property:sys.usb.ffs.ready=1 && property:sys.usb.ffs.mtp.ready=1 && property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1 && property:sys.usb.state=none
     write /config/usb_gadget/g1/idProduct 0x4EE2
     write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration mtp_adb
     symlink /config/usb_gadget/g1/functions/ffs.mtp /config/usb_gadget/g1/configs/b.1/f1
